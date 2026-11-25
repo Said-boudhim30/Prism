@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Crisp single-color geometric Prism & Audio Wave silhouette inside 66dp safe zone (21..87) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,25 L79,71 C80.5,73.7 78.6,77 75.5,77 L32.5,77 C29.4,77 27.5,73.7 29,71 L54,25 Z M54,37.5 L39.5,65 L68.5,65 L54,37.5 Z" />
+    <!-- Inner Play / Prism Refracted Bar -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,48 L62,55.5 L50,63 Z" />
+    <!-- Bottom Equalizer Pulse Accent -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M41,80.5 L67,80.5 C68.4,80.5 69.5,81.6 69.5,83 C69.5,84.4 68.4,85.5 67,85.5 L41,85.5 C39.6,85.5 38.5,84.4 38.5,83 C38.5,81.6 39.6,80.5 41,80.5 Z" />
+</vector>

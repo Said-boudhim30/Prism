@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">بريزم</string>
+    <string name="widget_description">ودجت التحكم بالوسائط بتصميم جوجل لبريزم</string>
+    <string name="widget_idle_subtitle">اضغط لفتح بريزم للوسائط</string>
+    <string name="widget_prev_desc">المقطع السابق</string>
+    <string name="widget_play_pause_desc">تشغيل أو إيقاف مؤقت</string>
+    <string name="widget_next_desc">المقطع التالي</string>
+</resources>

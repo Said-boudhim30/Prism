@@ -1,0 +1,6 @@
+{
+  "name": "Prism",
+  "description": "All-in-One Material 3 Expressive Media Player, 5-Band Equalizer, Video Cinema & Photo Gallery with full Arabic RTL and English LTR support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

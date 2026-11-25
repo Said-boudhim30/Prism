@@ -1,0 +1,33 @@
+<resources>
+    <string name="app_name">Prism</string>
+    <string name="widget_description">Google-style expressive media controls for Prism</string>
+    <string name="widget_idle_subtitle">Tap to open Prism Media</string>
+    <string name="widget_prev_desc">Previous track</string>
+    <string name="widget_play_pause_desc">Play or pause</string>
+    <string name="widget_next_desc">Next track</string>
+    <string name="widget_hub_label">Prism Expressive Hub</string>
+    <string name="widget_hub_description">4x2 Material You media player + quick tabs for Music, Videos and Photos</string>
+    <string name="widget_shortcut_music">♪ Music</string>
+    <string name="widget_shortcut_videos">▶ Videos</string>
+    <string name="widget_shortcut_photos">▣ Photos</string>
+    <string name="notif_channel_playback">Prism Media Playback</string>
+    <string name="notif_channel_playback_desc">Shows currently playing song with quick controls in notifications</string>
+    <string name="notif_stop_desc">Stop</string>
+    <string name="widget_vinyl_label">Prism Vinyl Square (2×2)</string>
+    <string name="widget_vinyl_description">Compact 2x2 Material You vinyl disc media card with play controls</string>
+    <string name="widget_quran_label">Prism Quran &amp; Tasbih (4×2)</string>
+    <string name="widget_quran_description">Live 114-Surah Khatma progress tracker and daily Tasbih counter</string>
+    <string name="widget_quran_khatma_title">Quran Khatma Progress</string>
+    <string name="widget_quran_open_hub">Open Mushaf</string>
+    <string name="widget_quran_open_tasbih">Tasbih</string>
+    <string name="widget_deck_label">Prism Pro Audio Deck (4×2)</string>
+    <string name="widget_deck_description">Studio audio player deck with live EQ preset, speed, and sleep timer badges</string>
+    <string name="widget_studio_dock_label">Prism Quick Studio Dock (4×1)</string>
+    <string name="widget_studio_dock_description">4 instant one-tap Material You launchers for Music, Videos, Vault, and Wi-Fi Transfer</string>
+    <string name="widget_shortcut_vault">Vault</string>
+    <string name="widget_shortcut_wifi">Wi-Fi</string>
+    <string name="quick_tile_label">Prism Play</string>
+    <string name="morning_alarm_channel_name">Prism Morning Recitation</string>
+    <string name="morning_alarm_title">Prism Morning Recitation</string>
+    <string name="morning_alarm_body">Tap to begin your peaceful morning Quran recitation</string>
+</resources>

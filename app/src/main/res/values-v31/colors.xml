@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Authentic Android 12+ Material You Wallpaper Dynamic Color tokens for Home Screen Widget -->
+    <color name="widget_surface_bg">@android:color/system_neutral1_900</color>
+    <color name="widget_border">@android:color/system_accent1_300</color>
+    <color name="widget_art_container">@android:color/system_accent2_700</color>
+    <color name="widget_primary">@android:color/system_accent1_200</color>
+    <color name="widget_on_surface">@android:color/system_neutral1_50</color>
+    <color name="widget_on_surface_variant">@android:color/system_neutral2_200</color>
+</resources>
