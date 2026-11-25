@@ -51,8 +51,18 @@ object MediaKnowledgeEngine {
     private data class DeezerResult(
         val artistName: String?,
         val artistPhotoUrl: String?,
+        val albumCoverUrl: String?,
         val albumTitle: String?,
         val bpm: Int,
+        val releaseYear: String?,
+        val genre: String?,
+    )
+
+    private data class ItunesResult(
+        val artistName: String?,
+        val trackTitle: String?,
+        val albumTitle: String?,
+        val albumCoverUrl: String?,
         val releaseYear: String?,
         val genre: String?,
     )
@@ -75,8 +85,9 @@ object MediaKnowledgeEngine {
             readCachedReport(context, cacheKey)?.let { return@withContext it }
         }
 
-        val cleanTitle = cleanMediaQuery(track.title)
-        val cleanArtist = cleanArtistName(track.artist)
+        val (parsedArtist, parsedTitle) = parseArtistAndTitleFromFilename(track.title, track.artist)
+        val cleanTitle = cleanMediaQuery(parsedTitle)
+        val cleanArtist = cleanArtistName(parsedArtist)
 
         // Built-in Ethics & Purity Shield: strictly refuse adult/explicit lookups
         if (ContentPurityGuard.isExplicitOrAdult(track.title, track.artist, track.album, track.uriString)) {
@@ -226,16 +237,24 @@ object MediaKnowledgeEngine {
             }
 
             else -> {
-                // Standard Music Track: Deezer + LRCLIB + Wikipedia in parallel!
+                // Standard Music Track: Deezer + iTunes Fallback + Offline ID3/LRCLIB Multi-Pass Lyrics + Wikipedia in parallel!
                 coroutineScope {
                     val deezerDeferred = async {
                         if (!track.isDemo && (cleanTitle.isNotBlank() || cleanArtist.isNotBlank())) {
                             fetchDeezerTrackAndArtist(cleanTitle, cleanArtist)
                         } else null
                     }
+                    val itunesDeferred = async {
+                        if (!track.isDemo && (cleanTitle.isNotBlank() || cleanArtist.isNotBlank())) {
+                            fetchItunesTrackMetadata(cleanTitle, cleanArtist)
+                        } else null
+                    }
                     val lyricsDeferred = async {
-                        if (fetchLyrics && !track.isDemo && cleanTitle.isNotBlank()) {
-                            fetchLrclibLyrics(cleanTitle, cleanArtist, track.album, (track.durationMs / 1000L).toInt())
+                        if (fetchLyrics && !track.isDemo) {
+                            extractEmbeddedId3Lyrics(context, track.uriString)
+                                ?: if (cleanTitle.isNotBlank()) {
+                                    fetchLrclibLyrics(cleanTitle, cleanArtist, track.album, (track.durationMs / 1000L).toInt())
+                                } else null
                         } else null
                     }
                     val artistWikiDeferred = async {
@@ -246,10 +265,14 @@ object MediaKnowledgeEngine {
                     }
 
                     val rawDeezer = deezerDeferred.await()
+                    val rawItunes = itunesDeferred.await()
                     val rawLyrics = lyricsDeferred.await()
                     val rawWiki = artistWikiDeferred.await()
 
                     val deezer = rawDeezer?.takeUnless {
+                        ContentPurityGuard.isExplicitOrAdult(it.artistName, it.albumTitle, it.genre)
+                    }
+                    val itunes = rawItunes?.takeUnless {
                         ContentPurityGuard.isExplicitOrAdult(it.artistName, it.albumTitle, it.genre)
                     }
                     val lyrics = ContentPurityGuard.filterLyricsStrictly(rawLyrics)
@@ -257,9 +280,26 @@ object MediaKnowledgeEngine {
                         ContentPurityGuard.isExplicitOrAdult(it.title, it.description, it.extract)
                     }
 
+                    val bestArtist = deezer?.artistName
+                        ?: itunes?.artistName
+                        ?: cleanArtist.takeIf { it.isNotBlank() }
+                        ?: track.artist
+
+                    // MusicBrainz + Cover Art Archive fallback only if neither Deezer nor iTunes returned HD cover art
+                    var resolvedAlbumCover = if (fetchArtistPhoto) {
+                        deezer?.albumCoverUrl ?: itunes?.albumCoverUrl
+                    } else null
+                    if (fetchArtistPhoto && resolvedAlbumCover == null && !track.isDemo && cleanTitle.isNotBlank()) {
+                        resolvedAlbumCover = fetchMusicBrainzCoverArt(cleanTitle, bestArtist)
+                    }
+
+                    val resolvedArtistPhoto = if (fetchArtistPhoto) {
+                        deezer?.artistPhotoUrl ?: wiki?.imageUrl ?: resolvedAlbumCover
+                    } else null
+
                     val (energy, bpm, mood) = computeTrackEnergyAndMood(
                         title = cleanTitle,
-                        artist = deezer?.artistName ?: cleanArtist,
+                        artist = bestArtist,
                         extension = track.extension,
                         durationMs = track.durationMs,
                         apiBpm = deezer?.bpm ?: 0,
@@ -267,13 +307,10 @@ object MediaKnowledgeEngine {
                         language = language
                     )
 
-                    val resolvedArtistPhoto = if (fetchArtistPhoto) {
-                        deezer?.artistPhotoUrl ?: wiki?.imageUrl
-                    } else null
-
                     val sources = buildList {
                         if (deezer != null) add("Deezer")
-                        if (!lyrics.isNullOrBlank()) add("LRCLIB")
+                        if (itunes != null) add("Catalog HD")
+                        if (!lyrics.isNullOrBlank()) add("Lyrics")
                         if (wiki != null) add("Wikipedia")
                         if (isEmpty()) add("Prism Local Audio Analyzer")
                     }.joinToString(" • ")
@@ -281,13 +318,14 @@ object MediaKnowledgeEngine {
                     MediaKnowledgeReport(
                         mediaId = track.id,
                         category = MediaKnowledgeCategory.MUSIC,
-                        artistName = deezer?.artistName ?: track.artist,
+                        artistName = bestArtist,
                         artistPhotoUrl = resolvedArtistPhoto,
+                        albumCoverUrl = resolvedAlbumCover,
                         artistBio = ContentPurityGuard.sanitizeEncyclopediaText(wiki?.extract).orEmpty(),
                         artistRole = ContentPurityGuard.sanitizeEncyclopediaText(wiki?.description).orEmpty(),
-                        albumTitle = deezer?.albumTitle ?: track.album,
-                        releaseYear = deezer?.releaseYear,
-                        genre = deezer?.genre,
+                        albumTitle = deezer?.albumTitle ?: itunes?.albumTitle ?: track.album,
+                        releaseYear = deezer?.releaseYear ?: itunes?.releaseYear,
+                        genre = deezer?.genre ?: itunes?.genre,
                         energyPercent = energy,
                         bpm = bpm,
                         moodLabel = mood,
@@ -295,7 +333,7 @@ object MediaKnowledgeEngine {
                         fetchedLyrics = lyrics,
                         encyclopediaTitle = wiki?.title,
                         encyclopediaSummary = ContentPurityGuard.sanitizeEncyclopediaText(wiki?.extract),
-                        encyclopediaImageUrl = wiki?.imageUrl,
+                        encyclopediaImageUrl = wiki?.imageUrl ?: resolvedAlbumCover,
                         encyclopediaUrl = wiki?.pageUrl,
                         sourceAttribution = sources,
                         fetchedAtMs = System.currentTimeMillis()
@@ -435,6 +473,182 @@ object MediaKnowledgeEngine {
     }
 
     /**
+     * Smart Filename Parser: when an audio file has an empty or placeholder ID3 artist tag
+     * (very common on phone downloads like "Saad Lamjarred - Lm3allem.mp3" or "عمرو دياب - تملي معاك"),
+     * automatically splits "Artist - Title" into clean (artist, title) search tokens.
+     */
+    fun parseArtistAndTitleFromFilename(rawTitle: String, rawArtist: String): Pair<String, String> {
+        val cleanedArtist = cleanArtistName(rawArtist)
+        val baseTitle = cleanMediaQuery(rawTitle)
+        if (cleanedArtist.isNotBlank()) {
+            // Strip redundant "Artist - " prefix from title if both exist
+            val prefixMatch = Regex(
+                """^${Regex.escape(cleanedArtist)}\s*[-–—|:]\s*(.+)$""",
+                RegexOption.IGNORE_CASE
+            ).find(baseTitle)
+            val stripped = prefixMatch?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            return cleanedArtist to (stripped.ifBlank { baseTitle })
+        }
+        val separators = listOf(" - ", " – ", " — ", " | ")
+        for (sep in separators) {
+            val idx = baseTitle.indexOf(sep)
+            if (idx in 2 until (baseTitle.length - sep.length - 1)) {
+                val left = baseTitle.substring(0, idx).trim()
+                val right = baseTitle.substring(idx + sep.length).trim()
+                if (left.length in 2..60 && right.length >= 2 && !left.all(Char::isDigit)) {
+                    return left to right
+                }
+            }
+        }
+        return "" to baseTitle
+    }
+
+    /**
+     * Downloads a fetched HD album cover / artist image once into persistent internal app storage
+     * so Full Player, Mini Player, Music List, Lock Screen & Notification render it instantly OFFLINE!
+     */
+    suspend fun downloadAndCacheArtwork(
+        context: Context,
+        imageUrl: String?,
+        trackId: String,
+    ): String? = withContext(Dispatchers.IO) {
+        val urlStr = imageUrl?.trim()?.takeIf { it.startsWith("https://") } ?: return@withContext null
+        val dir = File(context.filesDir, "prism_artwork_cache").apply { mkdirs() }
+        val fileName = "${buildCacheKey(trackId)}.jpg"
+        val outFile = File(dir, fileName)
+        if (outFile.exists() && outFile.length() > 1024L) {
+            return@withContext Uri.fromFile(outFile).toString()
+        }
+        var conn: HttpURLConnection? = null
+        try {
+            conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                setRequestProperty("User-Agent", USER_AGENT)
+            }
+            if (conn.responseCode in 200..299) {
+                val bytes = conn.inputStream.use { input ->
+                    val maxBytes = 2 * 1024 * 1024 // 2 MB cap
+                    val buf = java.io.ByteArrayOutputStream()
+                    val chunk = ByteArray(8192)
+                    var total = 0
+                    while (true) {
+                        val read = input.read(chunk)
+                        if (read <= 0) break
+                        total += read
+                        if (total > maxBytes) return@withContext urlStr
+                        buf.write(chunk, 0, read)
+                    }
+                    buf.toByteArray()
+                }
+                if (bytes.size > 512) {
+                    outFile.writeBytes(bytes)
+                    return@withContext Uri.fromFile(outFile).toString()
+                }
+            }
+            null
+        } catch (_: Throwable) {
+            urlStr // Fallback to direct HTTPS URL via Coil cache
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    /**
+     * Reads embedded ID3v2 USLT (Unsynchronized Lyrics) frames directly from local MP3 files
+     * so embedded offline lyrics display even without an internet connection.
+     */
+    fun extractEmbeddedId3Lyrics(context: Context, uriString: String): String? {
+        if (!uriString.startsWith("content://") && !uriString.startsWith("file://")) return null
+        return try {
+            val headerBytes = context.contentResolver.openInputStream(Uri.parse(uriString))?.use { stream ->
+                val maxRead = 196 * 1024 // ID3v2 header + tags at start of file
+                val buf = ByteArray(maxRead)
+                var offset = 0
+                while (offset < maxRead) {
+                    val r = stream.read(buf, offset, maxRead - offset)
+                    if (r <= 0) break
+                    offset += r
+                }
+                buf.copyOf(offset)
+            } ?: return null
+            parseId3v2UsltFrame(headerBytes)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    internal fun parseId3v2UsltFrame(bytes: ByteArray): String? {
+        if (bytes.size < 20) return null
+        if (bytes[0] != 'I'.code.toByte() || bytes[1] != 'D'.code.toByte() || bytes[2] != '3'.code.toByte()) {
+            return null
+        }
+        val majorVersion = bytes[3].toInt() and 0xFF
+        if (majorVersion !in 3..4) return null
+        val tagSize = ((bytes[6].toInt() and 0x7F) shl 21) or
+            ((bytes[7].toInt() and 0x7F) shl 14) or
+            ((bytes[8].toInt() and 0x7F) shl 7) or
+            (bytes[9].toInt() and 0x7F)
+        val end = minOf(bytes.size, 10 + tagSize)
+        var pos = 10
+        while (pos + 10 < end) {
+            val frameId = String(bytes, pos, 4, Charsets.ISO_8859_1)
+            if (frameId[0] == '\u0000') break
+            val frameSize = if (majorVersion == 4) {
+                ((bytes[pos + 4].toInt() and 0x7F) shl 21) or
+                    ((bytes[pos + 5].toInt() and 0x7F) shl 14) or
+                    ((bytes[pos + 6].toInt() and 0x7F) shl 7) or
+                    (bytes[pos + 7].toInt() and 0x7F)
+            } else {
+                ((bytes[pos + 4].toInt() and 0xFF) shl 24) or
+                    ((bytes[pos + 5].toInt() and 0xFF) shl 16) or
+                    ((bytes[pos + 6].toInt() and 0xFF) shl 8) or
+                    (bytes[pos + 7].toInt() and 0xFF)
+            }
+            if (frameSize <= 0 || pos + 10 + frameSize > end) break
+            if (frameId == "USLT" && frameSize > 5) {
+                val payloadStart = pos + 10
+                val encoding = bytes[payloadStart].toInt() and 0xFF
+                // Skip encoding (1 byte) + language (3 bytes) + null-terminated content descriptor
+                var textStart = payloadStart + 4
+                val payloadEnd = payloadStart + frameSize
+                if (encoding == 1 || encoding == 2) {
+                    while (textStart + 1 < payloadEnd) {
+                        if (bytes[textStart] == 0.toByte() && bytes[textStart + 1] == 0.toByte()) {
+                            textStart += 2
+                            break
+                        }
+                        textStart += 2
+                    }
+                } else {
+                    while (textStart < payloadEnd) {
+                        if (bytes[textStart] == 0.toByte()) {
+                            textStart += 1
+                            break
+                        }
+                        textStart += 1
+                    }
+                }
+                if (textStart < payloadEnd) {
+                    val charset = when (encoding) {
+                        1 -> Charsets.UTF_16
+                        2 -> Charsets.UTF_16BE
+                        3 -> Charsets.UTF_8
+                        else -> Charsets.ISO_8859_1
+                    }
+                    val text = String(bytes, textStart, payloadEnd - textStart, charset)
+                        .replace("\u0000", "")
+                        .trim()
+                    if (text.length >= 16) return text
+                }
+            }
+            pos += 10 + frameSize
+        }
+        return null
+    }
+
+    /**
      * Cleans noisy filenames like "01 - Artist - Song (Official Video) [320kbps].mp3"
      * into a crisp search query.
      */
@@ -442,7 +656,7 @@ object MediaKnowledgeEngine {
         return raw
             .replace(Regex("""\.[a-zA-Z0-9]{2,5}$"""), "")
             .replace(Regex("""^\d{1,3}\s*[-._)]\s*"""), "")
-            .replace(Regex("""[\[(].*?(official|hd|4k|1080p|720p|320kbps|mp3|flac|lyrics|video|audio|clip|remaster).*?[\])]""", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("""[\[(].*?(official|hd|4k|1080p|720p|320kbps|mp3|flac|lyrics|video|audio|clip|remaster|حصرية|فيديو كليب).*?[\])]""", RegexOption.IGNORE_CASE), " ")
             .replace('_', ' ')
             .replace(Regex("""\s+"""), " ")
             .trim()
@@ -452,7 +666,7 @@ object MediaKnowledgeEngine {
         val trimmed = raw.trim()
         val lower = trimmed.lowercase()
         if (lower.isBlank() || lower == "unknown" || lower == "unknown artist" || lower == "<unknown>" ||
-            lower == "فنان غير معروف" || lower == "prism studio"
+            lower == "local artist" || lower == "فنان غير معروف" || lower == "prism studio"
         ) {
             return ""
         }
@@ -563,9 +777,13 @@ object MediaKnowledgeEngine {
             }
             val photoUrl = artistObj?.optString("picture_xl")?.takeIf { it.startsWith("https://") }
                 ?: artistObj?.optString("picture_big")?.takeIf { it.startsWith("https://") }
+            val coverUrl = albumObj?.optString("cover_xl")?.takeIf { it.startsWith("https://") }
+                ?: albumObj?.optString("cover_big")?.takeIf { it.startsWith("https://") }
+                ?: albumObj?.optString("cover_medium")?.takeIf { it.startsWith("https://") }
             return DeezerResult(
                 artistName = artistObj?.optString("name")?.takeIf { it.isNotBlank() },
                 artistPhotoUrl = photoUrl,
+                albumCoverUrl = coverUrl,
                 albumTitle = albumObj?.optString("title")?.takeIf { it.isNotBlank() },
                 bpm = bpm,
                 releaseYear = releaseYear,
@@ -582,12 +800,68 @@ object MediaKnowledgeEngine {
                 return DeezerResult(
                     artistName = firstArtist.optString("name").takeIf { it.isNotBlank() },
                     artistPhotoUrl = photoUrl,
+                    albumCoverUrl = null,
                     albumTitle = null,
                     bpm = 0,
                     releaseYear = null,
                     genre = null
                 )
             }
+        }
+        return null
+    }
+
+    /**
+     * Free public HTTPS catalog fallback (massive Arabic, Moroccan, Rai, Chaabi & global coverage).
+     * Upgrades 100x100 artwork to crisp 600x600 HD cover art automatically.
+     */
+    private fun fetchItunesTrackMetadata(title: String, artist: String): ItunesResult? {
+        val term = listOf(artist, title).filter { it.isNotBlank() }.joinToString(" ").trim()
+        if (term.isBlank()) return null
+        val encoded = URLEncoder.encode(term, "UTF-8")
+        val json = httpGetJson("https://itunes.apple.com/search?media=music&entity=song&limit=3&term=$encoded")
+        val results = json?.optJSONArray("results") ?: return null
+        if (results.length() == 0) return null
+        val first = results.optJSONObject(0) ?: return null
+        val art100 = first.optString("artworkUrl100", "").takeIf { it.startsWith("https://") }
+        val artHd = art100?.replace("100x100bb", "600x600bb")
+        val year = first.optString("releaseDate", "").take(4).takeIf { it.length == 4 && it.all(Char::isDigit) }
+        return ItunesResult(
+            artistName = first.optString("artistName", "").takeIf { it.isNotBlank() },
+            trackTitle = first.optString("trackName", "").takeIf { it.isNotBlank() },
+            albumTitle = first.optString("collectionName", "").takeIf { it.isNotBlank() },
+            albumCoverUrl = artHd,
+            releaseYear = year,
+            genre = first.optString("primaryGenreName", "").takeIf { it.isNotBlank() }
+        )
+    }
+
+    /**
+     * Open MusicBrainz + Cover Art Archive fallback when neither primary catalog returns an album cover.
+     */
+    private fun fetchMusicBrainzCoverArt(title: String, artist: String): String? {
+        val q = buildString {
+            append("recording:\"").append(title.replace("\"", "")).append("\"")
+            if (artist.isNotBlank()) {
+                append(" AND artist:\"").append(artist.replace("\"", "")).append("\"")
+            }
+        }
+        val encoded = URLEncoder.encode(q, "UTF-8")
+        val json = httpGetJson("https://musicbrainz.org/ws/2/recording/?query=$encoded&limit=1&fmt=json")
+        val rec = json?.optJSONArray("recordings")?.optJSONObject(0) ?: return null
+        val releaseId = rec.optJSONArray("releases")?.optJSONObject(0)?.optString("id")
+            ?.takeIf { it.length >= 16 } ?: return null
+        val caa = httpGetJson("https://coverartarchive.org/release/$releaseId")
+        val images = caa?.optJSONArray("images") ?: return null
+        for (i in 0 until images.length()) {
+            val img = images.optJSONObject(i) ?: continue
+            val thumb = img.optJSONObject("thumbnails")?.optString("500")
+                ?.replace("http://", "https://")
+                ?.takeIf { it.startsWith("https://") }
+            val full = img.optString("image", "")
+                .replace("http://", "https://")
+                .takeIf { it.startsWith("https://") }
+            if (thumb != null || full != null) return thumb ?: full
         }
         return null
     }
@@ -599,7 +873,7 @@ object MediaKnowledgeEngine {
         durationSec: Int,
     ): String? {
         if (title.isBlank()) return null
-        // 1. Try exact match endpoint if we have artist
+        // 1. Exact match endpoint when artist is known
         if (artist.isNotBlank()) {
             val params = buildString {
                 append("track_name=").append(URLEncoder.encode(title, "UTF-8"))
@@ -617,17 +891,25 @@ object MediaKnowledgeEngine {
             val plain = exact?.optString("plainLyrics")?.takeIf { it.isNotBlank() && it != "null" }
             if (plain != null) return plain
         }
-        // 2. Fallback to broad search endpoint
-        val q = listOf(title, artist).filter { it.isNotBlank() }.joinToString(" ")
-        val arr = httpGetJsonArray("https://lrclib.net/api/search?q=${URLEncoder.encode(q, "UTF-8")}")
-        if (arr != null && arr.length() > 0) {
-            for (i in 0 until minOf(arr.length(), 4)) {
-                val obj = arr.optJSONObject(i) ?: continue
-                val synced = obj.optString("syncedLyrics").takeIf { it.isNotBlank() && it != "null" }
-                if (synced != null) return synced
+        // 2. Broad search pass (Artist + Title, then swapped Title + Artist if filename was reversed, then Title only)
+        val queries = linkedSetOf(
+            listOf(title, artist).filter { it.isNotBlank() }.joinToString(" "),
+            listOf(artist, title).filter { it.isNotBlank() }.joinToString(" "),
+            title,
+        ).filter { it.isNotBlank() }
+
+        for (q in queries) {
+            val arr = httpGetJsonArray("https://lrclib.net/api/search?q=${URLEncoder.encode(q, "UTF-8")}")
+            if (arr != null && arr.length() > 0) {
+                for (i in 0 until minOf(arr.length(), 4)) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val synced = obj.optString("syncedLyrics").takeIf { it.isNotBlank() && it != "null" }
+                    if (synced != null) return synced
+                }
+                val firstPlain = arr.optJSONObject(0)?.optString("plainLyrics")
+                    ?.takeIf { it.isNotBlank() && it != "null" }
+                if (firstPlain != null) return firstPlain
             }
-            val firstPlain = arr.optJSONObject(0)?.optString("plainLyrics")?.takeIf { it.isNotBlank() && it != "null" }
-            if (firstPlain != null) return firstPlain
         }
         return null
     }
@@ -816,6 +1098,7 @@ object MediaKnowledgeEngine {
                 put("category", report.category.name)
                 put("artistName", report.artistName)
                 put("artistPhotoUrl", report.artistPhotoUrl ?: JSONObject.NULL)
+                put("albumCoverUrl", report.albumCoverUrl ?: JSONObject.NULL)
                 put("artistBio", report.artistBio)
                 put("artistRole", report.artistRole)
                 put("albumTitle", report.albumTitle)
@@ -866,6 +1149,7 @@ object MediaKnowledgeEngine {
                     .getOrDefault(MediaKnowledgeCategory.MUSIC),
                 artistName = j.optString("artistName"),
                 artistPhotoUrl = j.optStrOrNull("artistPhotoUrl"),
+                albumCoverUrl = j.optStrOrNull("albumCoverUrl"),
                 artistBio = j.optString("artistBio"),
                 artistRole = j.optString("artistRole"),
                 albumTitle = j.optString("albumTitle"),

@@ -417,6 +417,9 @@ fun SettingsScreen(
     onOpenQuickCustomizer: () -> Unit = {},
     onOpenProAudioStudio: () -> Unit = {},
     onOpenDefaultPlayerSettings: () -> Unit = {},
+    isBatchEnriching: Boolean = false,
+    batchEnrichProgress: Pair<Int, Int> = 0 to 0,
+    onBatchAutoFetchMetadata: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
@@ -2702,6 +2705,46 @@ fun SettingsScreen(
                     onCheckedChange = onAutoFetchArtistPhotosChange,
                     testTag = "setting_auto_fetch_artist_photo"
                 )
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = onBatchAutoFetchMetadata,
+                    enabled = !isBatchEnriching,
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("batch_enrich_library_button")
+                ) {
+                    if (isBatchEnriching) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = strings.batchEnrichProgressLabel(
+                                batchEnrichProgress.first,
+                                batchEnrichProgress.second.coerceAtLeast(1)
+                            ),
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = strings.batchEnrichLibraryAction,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 FilledTonalButton(
                     onClick = onClearKnowledgeCache,

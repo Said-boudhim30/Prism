@@ -1880,6 +1880,91 @@ class ExampleRobolectricTest {
             }
         }
     }
+
+    @Test
+    fun `smart filename parser id3v2 uslt extractor artwork tag persistence and metadata strings work cleanly`() {
+        // 1. Smart Artist - Title filename parsing (English & Arabic)
+        val (artistEn, titleEn) = com.example.data.MediaKnowledgeEngine.parseArtistAndTitleFromFilename(
+            rawTitle = "Maher Zain - Ya Nabi Salam Alayka (Official Audio).mp3",
+            rawArtist = "Unknown Artist"
+        )
+        assertEquals("Maher Zain", artistEn)
+        assertEquals("Ya Nabi Salam Alayka", titleEn)
+
+        val (artistAr, titleAr) = com.example.data.MediaKnowledgeEngine.parseArtistAndTitleFromFilename(
+            rawTitle = "سعد لمجرد – المعلم",
+            rawArtist = ""
+        )
+        assertEquals("سعد لمجرد", artistAr)
+        assertEquals("المعلم", titleAr)
+
+        // 2. Embedded ID3v2.3 USLT lyrics frame parser (UTF-8 encoding = 3)
+        val lyricsBody = "Line one of embedded lyrics\nLine two of embedded lyrics"
+        val usltPayload = byteArrayOf(
+            3, // UTF-8
+            'e'.code.toByte(), 'n'.code.toByte(), 'g'.code.toByte(),
+            0, // empty content descriptor terminator
+        ) + lyricsBody.toByteArray(Charsets.UTF_8)
+        val frameSize = usltPayload.size
+        val tagSize = 10 + frameSize
+        val synchsafeSize = byteArrayOf(
+            ((tagSize shr 21) and 0x7F).toByte(),
+            ((tagSize shr 14) and 0x7F).toByte(),
+            ((tagSize shr 7) and 0x7F).toByte(),
+            (tagSize and 0x7F).toByte()
+        )
+        val id3Bytes = byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 3, 0, 0) +
+            synchsafeSize +
+            byteArrayOf('U'.code.toByte(), 'S'.code.toByte(), 'L'.code.toByte(), 'T'.code.toByte()) +
+            byteArrayOf(
+                ((frameSize shr 24) and 0xFF).toByte(),
+                ((frameSize shr 16) and 0xFF).toByte(),
+                ((frameSize shr 8) and 0xFF).toByte(),
+                (frameSize and 0xFF).toByte()
+            ) +
+            byteArrayOf(0, 0) +
+            usltPayload
+        val parsedLyrics = com.example.data.MediaKnowledgeEngine.parseId3v2UsltFrame(id3Bytes)
+        assertEquals(lyricsBody, parsedLyrics)
+
+        // 3. TrackTagOverride JSON round-trip preserves local cached artwork URI
+        val rawJson = org.json.JSONObject().apply {
+            put(
+                "track_42",
+                org.json.JSONObject().apply {
+                    put("title", "Ya Nabi Salam Alayka")
+                    put("artist", "Maher Zain")
+                    put("album", "Thank You Allah")
+                    put("artwork", "file:///data/user/0/com.example/files/prism_artwork_cache/cover_42.jpg")
+                }
+            )
+        }.toString()
+        val parsedTags = com.example.data.SettingsRepository.parseTagOverridesJson(rawJson)
+        val tag = parsedTags["track_42"]
+        assertTrue("Parsed TrackTagOverride should exist", tag != null)
+        assertEquals("Maher Zain", tag!!.artist)
+        assertEquals("file:///data/user/0/com.example/files/prism_artwork_cache/cover_42.jpg", tag.artworkUriString)
+
+        // 4. All new metadata & cover enrichment strings across EN/AR/FR/ES with zero trademarks
+        val forbidden = listOf("spotify", "apple", "itunes", "deezer", "musicbrainz", "shazam", "youtube")
+        AppLanguage.entries.forEach { lang ->
+            val s = stringsFor(lang)
+            val checked = listOf(
+                s.fetchCoverAndLyricsAction,
+                s.batchEnrichLibraryAction,
+                s.batchEnrichProgressLabel(4, 12),
+                s.batchEnrichCompletedBanner(5, 8),
+                s.coverAndLyricsUpdatedBanner,
+            )
+            checked.forEach { text ->
+                assertTrue("Metadata string must not be blank for $lang", text.isNotBlank())
+                val lower = text.lowercase()
+                forbidden.forEach { brand ->
+                    assertTrue("Metadata string must not contain trademark '$brand': $text", !lower.contains(brand))
+                }
+            }
+        }
+    }
 }
 
 

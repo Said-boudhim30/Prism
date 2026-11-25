@@ -1057,7 +1057,7 @@ fun VideoPlayerScreen(
                         }
                     }
 
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && onRequestSystemPip != null) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
                             shape = CircleShape,
@@ -1065,15 +1065,12 @@ fun VideoPlayerScreen(
                         ) {
                             IconButton(
                                 onClick = {
-                                    if (onRequestSystemPip != null) {
-                                        onRequestSystemPip()
-                                    } else {
-                                        activity?.enterPictureInPictureMode(
-                                            PictureInPictureParams.Builder()
-                                                .setAspectRatio(Rational(16, 9))
-                                                .build()
-                                        )
-                                    }
+                                    controlsVisible = false
+                                    showSubtitleStudioDialog = false
+                                    showAudioTrackDialog = false
+                                    showColorCalibDialog = false
+                                    showChaptersDialog = false
+                                    onRequestSystemPip()
                                 },
                                 modifier = Modifier
                                     .size(48.dp)

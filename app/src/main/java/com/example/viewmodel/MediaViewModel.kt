@@ -93,6 +93,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -270,6 +271,12 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _enrichingIds = MutableStateFlow<Set<String>>(emptySet())
     val enrichingIds: StateFlow<Set<String>> = _enrichingIds.asStateFlow()
+
+    private val _isBatchEnriching = MutableStateFlow(false)
+    val isBatchEnriching: StateFlow<Boolean> = _isBatchEnriching.asStateFlow()
+
+    private val _batchEnrichProgress = MutableStateFlow(0 to 0)
+    val batchEnrichProgress: StateFlow<Pair<Int, Int>> = _batchEnrichProgress.asStateFlow()
 
     private val _securityAudit = MutableStateFlow(AppSecurityVerifier.inspect(application))
     val securityAudit: StateFlow<SecurityAuditInfo> = _securityAudit.asStateFlow()
@@ -674,6 +681,7 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
         audioController.abLoopEndMs,
         audioController.hifzRemainingLoops,
         audioController.isMuted,
+        settingsRepo.tagOverridesFlow,
     ) { values ->
         val rawTrack = values[0] as AudioTrack?
         val isPlaying = values[1] as Boolean
@@ -692,11 +700,18 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
         val abEnd = values[12] as Long?
         val hifzRem = values[13] as Int
         val muted = values[14] as Boolean
+        @Suppress("UNCHECKED_CAST")
+        val tagOverrides = values[15] as Map<String, com.example.model.TrackTagOverride>
 
         val syncedTrack = rawTrack?.let { t ->
-            val renamed = customTitles[t.id]?.takeIf { it.isNotBlank() }
+            val tag = tagOverrides[t.id]
+            val renamed = tag?.title?.takeIf { it.isNotBlank() }
+                ?: customTitles[t.id]?.takeIf { it.isNotBlank() }
             t.copy(
                 title = renamed ?: t.title,
+                artist = tag?.artist?.takeIf { it.isNotBlank() } ?: t.artist,
+                album = tag?.album?.takeIf { it.isNotBlank() } ?: t.album,
+                artworkUriString = tag?.artworkUriString?.takeIf { it.isNotBlank() } ?: t.artworkUriString,
                 isFavorite = favs.contains(t.id)
             )
         }
@@ -743,6 +758,7 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
                 settings,
                 audioController.playbackSpeed,
                 quranKhatmaProgress,
+                settingsRepo.tagOverridesFlow,
             ) { values ->
                 val track = values[0] as AudioTrack?
                 val isPlaying = values[1] as Boolean
@@ -751,9 +767,18 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
                 val currentSettings = values[3] as AppSettings
                 val speed = values[4] as Float
                 val khatma = values[5] as QuranKhatmaProgress
+                @Suppress("UNCHECKED_CAST")
+                val tagOverrides = values[6] as Map<String, com.example.model.TrackTagOverride>
                 val syncedTrack = track?.let { t ->
-                    val renamed = customTitles[t.id]?.takeIf { it.isNotBlank() }
-                    t.copy(title = renamed ?: t.title)
+                    val tag = tagOverrides[t.id]
+                    val renamed = tag?.title?.takeIf { it.isNotBlank() }
+                        ?: customTitles[t.id]?.takeIf { it.isNotBlank() }
+                    t.copy(
+                        title = renamed ?: t.title,
+                        artist = tag?.artist?.takeIf { it.isNotBlank() } ?: t.artist,
+                        album = tag?.album?.takeIf { it.isNotBlank() } ?: t.album,
+                        artworkUriString = tag?.artworkUriString?.takeIf { it.isNotBlank() } ?: t.artworkUriString,
+                    )
                 }
                 WidgetSyncSnapshot(syncedTrack, isPlaying, currentSettings, speed, khatma)
             }.collect { snap ->
@@ -2280,6 +2305,46 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
         _detailsInfo.value = null
     }
 
+    private suspend fun applyReportCoverAndMetadata(
+        track: AudioTrack,
+        report: MediaKnowledgeReport,
+        forceOverwriteArtwork: Boolean,
+    ): Boolean {
+        val bestRemoteArt = report.albumCoverUrl?.takeIf { it.isNotBlank() }
+            ?: report.artistPhotoUrl?.takeIf { it.isNotBlank() }
+        val shouldDownloadArt = !bestRemoteArt.isNullOrBlank() &&
+            (track.artworkUriString.isNullOrBlank() || forceOverwriteArtwork)
+        val cachedLocalArt = if (shouldDownloadArt && bestRemoteArt != null) {
+            MediaKnowledgeEngine.downloadAndCacheArtwork(getApplication(), bestRemoteArt, track.id)
+        } else null
+
+        val hasRealArtist = MediaKnowledgeEngine.cleanArtistName(track.artist).isNotBlank()
+        val missingArtist = if (!hasRealArtist) {
+            report.artistName?.takeIf { it.isNotBlank() }
+        } else null
+
+        val hasRealAlbum = track.album.isNotBlank() &&
+            !track.album.equals("Unknown Album", ignoreCase = true) &&
+            !track.album.equals("Local Music", ignoreCase = true) &&
+            !track.album.equals("Local", ignoreCase = true) &&
+            !track.album.equals("<unknown>", ignoreCase = true)
+        val missingAlbum = if (!hasRealAlbum) {
+            report.albumTitle?.takeIf { it.isNotBlank() }
+        } else null
+
+        if (cachedLocalArt != null || missingArtist != null || missingAlbum != null) {
+            settingsRepo.saveTrackArtworkAndFillMissingTags(
+                trackId = track.id,
+                artworkUriString = cachedLocalArt,
+                detectedArtist = missingArtist,
+                detectedAlbum = missingAlbum,
+                forceOverwriteArtwork = forceOverwriteArtwork,
+            )
+            return cachedLocalArt != null
+        }
+        return false
+    }
+
     fun enrichAudioTrack(track: AudioTrack, forceRefresh: Boolean = false) {
         val key = track.id
         if (!forceRefresh && _knowledgeReports.value.containsKey(key)) return
@@ -2297,6 +2362,8 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
                     forceRefresh = forceRefresh,
                 )
                 _knowledgeReports.value = _knowledgeReports.value + (key to report)
+                // Auto-apply HD album cover & fill blank/unknown artist/album tags for live display everywhere
+                applyReportCoverAndMetadata(track, report, forceOverwriteArtwork = forceRefresh)
                 // Auto-populate synced/plain lyrics if found and not already customized (or forced)
                 val fetchedLyrics = report.fetchedLyrics
                 if (!fetchedLyrics.isNullOrBlank()) {
@@ -2327,15 +2394,116 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
                     forceRefresh = true,
                 )
                 _knowledgeReports.value = _knowledgeReports.value + (key to report)
+                val coverSaved = applyReportCoverAndMetadata(track, report, forceOverwriteArtwork = false)
                 val fetchedLyrics = report.fetchedLyrics
                 if (!fetchedLyrics.isNullOrBlank()) {
                     settingsRepo.saveTrackLyrics(track.id, fetchedLyrics)
                     _statusBanner.value = stringsFor(currentSettings.language).lyricsSavedBanner
+                } else if (coverSaved) {
+                    _statusBanner.value = stringsFor(currentSettings.language).coverAndLyricsUpdatedBanner
                 } else {
                     _statusBanner.value = stringsFor(currentSettings.language).noOnlineInfoFound
                 }
             } finally {
                 _enrichingIds.value = _enrichingIds.value - key
+            }
+        }
+    }
+
+    fun fetchCoverAndLyricsForTrack(track: AudioTrack) {
+        val key = track.id
+        if (key in _enrichingIds.value) return
+        val currentSettings = settings.value
+        _enrichingIds.value = _enrichingIds.value + key
+        viewModelScope.launch {
+            try {
+                val report = MediaKnowledgeEngine.enrichAudioTrack(
+                    context = getApplication(),
+                    track = track,
+                    language = currentSettings.language,
+                    fetchLyrics = true,
+                    fetchArtistPhoto = true,
+                    forceRefresh = true,
+                )
+                _knowledgeReports.value = _knowledgeReports.value + (key to report)
+                val coverUpdated = applyReportCoverAndMetadata(track, report, forceOverwriteArtwork = true)
+                val fetchedLyrics = report.fetchedLyrics
+                if (!fetchedLyrics.isNullOrBlank()) {
+                    settingsRepo.saveTrackLyrics(track.id, fetchedLyrics)
+                }
+                val hasMetadataFound = coverUpdated ||
+                    !fetchedLyrics.isNullOrBlank() ||
+                    !report.artistPhotoUrl.isNullOrBlank() ||
+                    !report.albumCoverUrl.isNullOrBlank() ||
+                    report.artistBio.isNotBlank()
+                _statusBanner.value = if (hasMetadataFound) {
+                    stringsFor(currentSettings.language).coverAndLyricsUpdatedBanner
+                } else {
+                    stringsFor(currentSettings.language).noOnlineInfoFound
+                }
+            } finally {
+                _enrichingIds.value = _enrichingIds.value - key
+            }
+        }
+    }
+
+    fun batchAutoFetchLibraryMetadata() {
+        if (_isBatchEnriching.value) return
+        val currentSettings = settings.value
+        val existingLyrics = customLyrics.value
+        val candidates = audioTracks.value
+            .filter { !it.isDemo && (it.artworkUriString.isNullOrBlank() || existingLyrics[it.id].isNullOrBlank()) }
+            .take(60)
+        if (candidates.isEmpty()) {
+            _statusBanner.value = stringsFor(currentSettings.language).batchEnrichCompletedBanner(0, 0)
+            return
+        }
+        viewModelScope.launch {
+            _isBatchEnriching.value = true
+            _batchEnrichProgress.value = 0 to candidates.size
+            val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
+            val coversCount = java.util.concurrent.atomic.AtomicInteger(0)
+            val lyricsCount = java.util.concurrent.atomic.AtomicInteger(0)
+            val gate = kotlinx.coroutines.sync.Semaphore(3)
+            try {
+                kotlinx.coroutines.coroutineScope {
+                    candidates.map { track ->
+                        this.async(kotlinx.coroutines.Dispatchers.IO) {
+                            gate.acquire()
+                            try {
+                                val report = MediaKnowledgeEngine.enrichAudioTrack(
+                                    context = getApplication(),
+                                    track = track,
+                                    language = currentSettings.language,
+                                    fetchLyrics = true,
+                                    fetchArtistPhoto = true,
+                                    forceRefresh = false,
+                                )
+                                _knowledgeReports.value = _knowledgeReports.value + (track.id to report)
+                                if (applyReportCoverAndMetadata(track, report, forceOverwriteArtwork = false)) {
+                                    coversCount.incrementAndGet()
+                                }
+                                val fetchedLyrics = report.fetchedLyrics
+                                if (!fetchedLyrics.isNullOrBlank() && customLyrics.value[track.id].isNullOrBlank()) {
+                                    settingsRepo.saveTrackLyrics(track.id, fetchedLyrics)
+                                    lyricsCount.incrementAndGet()
+                                }
+                            } catch (_: Throwable) {
+                                // Skip single track network failure gracefully
+                            } finally {
+                                gate.release()
+                                _batchEnrichProgress.value = completedCount.incrementAndGet() to candidates.size
+                            }
+                        }
+                    }.forEach { it.await() }
+                }
+                _statusBanner.value = stringsFor(currentSettings.language).batchEnrichCompletedBanner(
+                    coversCount.get(),
+                    lyricsCount.get()
+                )
+            } finally {
+                _isBatchEnriching.value = false
+                _batchEnrichProgress.value = 0 to 0
             }
         }
     }

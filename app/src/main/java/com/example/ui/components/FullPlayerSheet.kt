@@ -242,6 +242,7 @@ fun FullPlayerSheet(
     onOpenProAudioStudio: () -> Unit = {},
     onToggleAutoStudio: (Boolean) -> Unit = {},
     onToggleDspBypass: (Boolean) -> Unit = {},
+    onFetchCoverAndLyrics: (AudioTrack) -> Unit = {},
 ) {
     val track = playbackState.currentTrack ?: return
     val context = LocalContext.current
@@ -1184,6 +1185,23 @@ fun FullPlayerSheet(
                                 label = { Text(strings.menuShare) },
                                 shape = CircleShape,
                                 modifier = Modifier.testTag("full_player_share")
+                            )
+                            FilterChip(
+                                selected = isEnriching,
+                                onClick = {
+                                    showExtrasSheet = false
+                                    onFetchCoverAndLyrics(track)
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Filled.AutoAwesome,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                label = { Text(strings.fetchCoverAndLyricsAction) },
+                                shape = CircleShape,
+                                modifier = Modifier.testTag("full_player_fetch_cover_lyrics")
                             )
                             if (onRequestMusicPip != null) {
                                 FilterChip(

@@ -210,6 +210,7 @@ fun FloatingInAppVideoWindow(
     modifier: Modifier = Modifier,
     dockSide: EdgeDockSide = EdgeDockSide.RIGHT,
     containerHeightPx: Float = 1600f,
+    isInPipMode: Boolean = false,
     onDragStateChanged: (isDragging: Boolean, isOverDismissZone: Boolean) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
@@ -272,18 +273,25 @@ fun FloatingInAppVideoWindow(
         }
     }
 
-    // Keep Row & ExoPlayer alive even when tucked (shrink video box to 1dp while keeping handle visible)
+    // Keep Row & ExoPlayer alive even when tucked or in Android system PiP (zero codec teardown!)
+    val effectiveTucked = isEdgeTucked && !isInPipMode
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = modifier
-            .absoluteOffset {
-                IntOffset(
-                    x = if (isEdgeTucked) 0 else offsetX.roundToInt(),
-                    y = offsetY.roundToInt()
-                )
-            }
+        modifier = (if (isInPipMode) Modifier.fillMaxSize() else modifier)
             .then(
-                if (!isEdgeTucked) {
+                if (isInPipMode) {
+                    Modifier
+                } else {
+                    Modifier.absoluteOffset {
+                        IntOffset(
+                            x = if (effectiveTucked) 0 else offsetX.roundToInt(),
+                            y = offsetY.roundToInt()
+                        )
+                    }
+                }
+            )
+            .then(
+                if (!effectiveTucked && !isInPipMode) {
                     Modifier.pointerInput(containerHeightPx) {
                         detectDragGestures(
                             onDragStart = {
@@ -314,7 +322,7 @@ fun FloatingInAppVideoWindow(
                 }
             )
     ) {
-        if (dockSide == EdgeDockSide.LEFT) {
+        if (!isInPipMode && dockSide == EdgeDockSide.LEFT) {
             StickyEdgeTuckHandle(
                 isTucked = isEdgeTucked,
                 dockSide = EdgeDockSide.LEFT,
@@ -327,16 +335,19 @@ fun FloatingInAppVideoWindow(
         }
 
         Surface(
-            shape = RoundedCornerShape(22.dp),
+            shape = if (isInPipMode) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(22.dp),
             color = Color.Black,
-            shadowElevation = if (isEdgeTucked) 0.dp else 16.dp,
-            tonalElevation = if (isEdgeTucked) 0.dp else 10.dp,
-            border = if (isEdgeTucked) null else BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
-            modifier = Modifier
-                .width(if (isEdgeTucked) 1.dp else winWidthDp)
-                .height(if (isEdgeTucked) 1.dp else winHeightDp)
-                .alpha(if (isEdgeTucked) 0f else 1f)
-                .testTag("floating_in_app_video_window")
+            shadowElevation = if (effectiveTucked || isInPipMode) 0.dp else 16.dp,
+            tonalElevation = if (effectiveTucked || isInPipMode) 0.dp else 10.dp,
+            border = if (effectiveTucked || isInPipMode) null else BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+            modifier = (if (isInPipMode) {
+                Modifier.fillMaxSize()
+            } else {
+                Modifier
+                    .width(if (effectiveTucked) 1.dp else winWidthDp)
+                    .height(if (effectiveTucked) 1.dp else winHeightDp)
+                    .alpha(if (effectiveTucked) 0f else 1f)
+            }).testTag("floating_in_app_video_window")
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AndroidView(
@@ -353,7 +364,7 @@ fun FloatingInAppVideoWindow(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                if (!isEdgeTucked) {
+                if (!effectiveTucked && !isInPipMode) {
                     // Subtle top overlay controls (Title + Resize + Expand + Close)
                     Row(
                         modifier = Modifier
@@ -533,7 +544,7 @@ fun FloatingInAppVideoWindow(
             }
         }
 
-        if (dockSide == EdgeDockSide.RIGHT) {
+        if (!isInPipMode && dockSide == EdgeDockSide.RIGHT) {
             StickyEdgeTuckHandle(
                 isTucked = isEdgeTucked,
                 dockSide = EdgeDockSide.RIGHT,
@@ -756,7 +767,6 @@ fun PipAudioModeView(
     strings: AppStrings,
 ) {
     val track = playbackState.currentTrack
-    val spectrumLevels by spectrumLevelsFlow.collectAsStateWithLifecycle()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -811,10 +821,9 @@ fun PipAudioModeView(
                         overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    LiveAudioSpectrumBars(
-                        levels = spectrumLevels.take(8),
+                    PipMiniSpectrumLeaf(
+                        spectrumLevelsFlow = spectrumLevelsFlow,
                         isPlaying = playbackState.isPlaying,
-                        barCount = 8,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(16.dp)
@@ -832,6 +841,21 @@ fun PipAudioModeView(
             }
         }
     }
+}
+
+@Composable
+private fun PipMiniSpectrumLeaf(
+    spectrumLevelsFlow: StateFlow<List<Float>>,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val spectrumLevels by spectrumLevelsFlow.collectAsStateWithLifecycle()
+    LiveAudioSpectrumBars(
+        levels = spectrumLevels.take(8),
+        isPlaying = isPlaying,
+        barCount = 8,
+        modifier = modifier
+    )
 }
 
 /**

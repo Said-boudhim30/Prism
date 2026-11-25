@@ -1045,16 +1045,72 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    suspend fun saveTrackTagOverride(trackId: String, title: String, artist: String, album: String) {
+    suspend fun saveTrackTagOverride(
+        trackId: String,
+        title: String,
+        artist: String,
+        album: String,
+        artworkUriString: String? = null,
+    ) {
         context.dataStore.edit { prefs ->
             val current = runCatching { JSONObject(prefs[Keys.TAG_OVERRIDES_JSON] ?: "{}") }
                 .getOrElse { JSONObject() }
+            val existingArtwork = current.optJSONObject(trackId)?.optString("artwork", "")
+                ?.takeIf { it.isNotBlank() && it != "null" }
+            val resolvedArtwork = artworkUriString?.takeIf { it.isNotBlank() } ?: existingArtwork
             current.put(
                 trackId,
                 JSONObject().apply {
                     put("title", title.trim())
                     put("artist", artist.trim())
                     put("album", album.trim())
+                    if (!resolvedArtwork.isNullOrBlank()) {
+                        put("artwork", resolvedArtwork)
+                    }
+                }
+            )
+            prefs[Keys.TAG_OVERRIDES_JSON] = current.toString()
+        }
+    }
+
+    /**
+     * Auto-applies fetched HD album cover art (cached locally for offline use) and fills in
+     * missing artist/album tags without overwriting any user-edited custom titles or real tags.
+     */
+    suspend fun saveTrackArtworkAndFillMissingTags(
+        trackId: String,
+        artworkUriString: String?,
+        detectedArtist: String?,
+        detectedAlbum: String?,
+        forceOverwriteArtwork: Boolean = false,
+    ) {
+        if (artworkUriString.isNullOrBlank() && detectedArtist.isNullOrBlank() && detectedAlbum.isNullOrBlank()) return
+        context.dataStore.edit { prefs ->
+            val current = runCatching { JSONObject(prefs[Keys.TAG_OVERRIDES_JSON] ?: "{}") }
+                .getOrElse { JSONObject() }
+            val prev = current.optJSONObject(trackId)
+            val prevTitle = prev?.optString("title", "").orEmpty()
+            val prevArtist = prev?.optString("artist", "").orEmpty()
+            val prevAlbum = prev?.optString("album", "").orEmpty()
+            val prevArtwork = prev?.optString("artwork", "")?.takeIf { it.isNotBlank() && it != "null" }
+
+            val finalArtist = prevArtist.ifBlank { detectedArtist?.trim().orEmpty() }
+            val finalAlbum = prevAlbum.ifBlank { detectedAlbum?.trim().orEmpty() }
+            val finalArtwork = when {
+                forceOverwriteArtwork && !artworkUriString.isNullOrBlank() -> artworkUriString
+                !prevArtwork.isNullOrBlank() -> prevArtwork
+                else -> artworkUriString
+            }
+
+            current.put(
+                trackId,
+                JSONObject().apply {
+                    put("title", prevTitle)
+                    put("artist", finalArtist)
+                    put("album", finalAlbum)
+                    if (!finalArtwork.isNullOrBlank()) {
+                        put("artwork", finalArtwork)
+                    }
                 }
             )
             prefs[Keys.TAG_OVERRIDES_JSON] = current.toString()
@@ -2448,7 +2504,9 @@ class SettingsRepository(private val context: Context) {
                             TrackTagOverride(
                                 title = obj.optString("title", ""),
                                 artist = obj.optString("artist", ""),
-                                album = obj.optString("album", "")
+                                album = obj.optString("album", ""),
+                                artworkUriString = obj.optString("artwork", "")
+                                    .takeIf { it.isNotBlank() && it != "null" }
                             )
                         )
                     }

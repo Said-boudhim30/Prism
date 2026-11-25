@@ -504,6 +504,11 @@ interface AppStrings {
     val photoLocationLabel: String
     val knowledgeSourcePrefix: String
     val noOnlineInfoFound: String
+    val fetchCoverAndLyricsAction: String
+    val batchEnrichLibraryAction: String
+    val batchEnrichProgressLabel: (Int, Int) -> String
+    val batchEnrichCompletedBanner: (Int, Int) -> String
+    val coverAndLyricsUpdatedBanner: String
     val gaplessPlaybackTitle: String
     val gaplessPlaybackDesc: String
     val audioNormalizationTitle: String
@@ -1515,6 +1520,13 @@ private object EnglishStrings : AppStrings {
     override val photoLocationLabel = "Captured Location"
     override val knowledgeSourcePrefix = "Sources:"
     override val noOnlineInfoFound = "Connect to the internet or tap Refresh to research this file."
+    override val fetchCoverAndLyricsAction = "Fetch Cover & Lyrics"
+    override val batchEnrichLibraryAction = "Auto-Fetch Covers & Lyrics for Library"
+    override val batchEnrichProgressLabel: (Int, Int) -> String = { done, total -> "Fetching metadata $done / $total..." }
+    override val batchEnrichCompletedBanner: (Int, Int) -> String = { covers, lyrics ->
+        "Updated $covers HD covers & $lyrics synced lyrics"
+    }
+    override val coverAndLyricsUpdatedBanner = "HD cover art & lyrics updated"
     override val gaplessPlaybackTitle = "Gapless Audio Playback"
     override val gaplessPlaybackDesc = "Eliminate silence gaps between consecutive album tracks"
     override val audioNormalizationTitle = "Loudness Normalization"
@@ -2551,6 +2563,13 @@ private object ArabicStrings : AppStrings {
     override val photoLocationLabel = "موقع التقاط الصورة"
     override val knowledgeSourcePrefix = "المصادر:"
     override val noOnlineInfoFound = "اتصل بالإنترنت أو اضغط «تحديث المعلومات» لاستكشاف تفاصيل هذا الملف."
+    override val fetchCoverAndLyricsAction = "جلب الغلاف والكلمات"
+    override val batchEnrichLibraryAction = "جلب الأغلفة والكلمات للمكتبة تلقائيًا"
+    override val batchEnrichProgressLabel: (Int, Int) -> String = { done, total -> "جاري جلب البيانات $done / $total..." }
+    override val batchEnrichCompletedBanner: (Int, Int) -> String = { covers, lyrics ->
+        "تم تحديث $covers غلاف عالي الدقة و $lyrics كلمات متزامنة"
+    }
+    override val coverAndLyricsUpdatedBanner = "تم تحديث الغلاف والكلمات بنجاح"
     override val gaplessPlaybackTitle = "تشغيل متصل بدون فواصل (Gapless)"
     override val gaplessPlaybackDesc = "إزالة لحظات الصمت بين المقاطع المتتالية في الألبومات والقرآن"
     override val audioNormalizationTitle = "موازنة ارتفاع الصوت تلقائيًا"
@@ -3103,6 +3122,13 @@ private object FrenchStrings : AppStrings by EnglishStrings {
     override val photoLocationLabel = "Lieu de prise de vue"
     override val knowledgeSourcePrefix = "Sources :"
     override val noOnlineInfoFound = "Connectez-vous à Internet ou appuyez sur Actualiser pour explorer ce fichier."
+    override val fetchCoverAndLyricsAction = "Pochette & Paroles"
+    override val batchEnrichLibraryAction = "Récupérer pochettes & paroles (bibliothèque)"
+    override val batchEnrichProgressLabel: (Int, Int) -> String = { done, total -> "Récupération $done / $total..." }
+    override val batchEnrichCompletedBanner: (Int, Int) -> String = { covers, lyrics ->
+        "$covers pochettes HD et $lyrics paroles mises à jour"
+    }
+    override val coverAndLyricsUpdatedBanner = "Pochette HD et paroles mises à jour"
     override val gaplessPlaybackTitle = "Lecture sans blanc (Gapless)"
     override val gaplessPlaybackDesc = "Supprime les silences entre les pistes consécutives"
     override val audioNormalizationTitle = "Normalisation du volume"
@@ -3442,6 +3468,13 @@ private object SpanishStrings : AppStrings by EnglishStrings {
     override val photoLocationLabel = "Ubicación de captura"
     override val knowledgeSourcePrefix = "Fuentes:"
     override val noOnlineInfoFound = "Conéctate a Internet o pulsa Actualizar para investigar este archivo."
+    override val fetchCoverAndLyricsAction = "Carátula y Letras"
+    override val batchEnrichLibraryAction = "Descargar carátulas y letras de la biblioteca"
+    override val batchEnrichProgressLabel: (Int, Int) -> String = { done, total -> "Obteniendo datos $done / $total..." }
+    override val batchEnrichCompletedBanner: (Int, Int) -> String = { covers, lyrics ->
+        "Actualizadas $covers carátulas HD y $lyrics letras"
+    }
+    override val coverAndLyricsUpdatedBanner = "Carátula HD y letras actualizadas"
     override val gaplessPlaybackTitle = "Reproducción sin pausas (Gapless)"
     override val gaplessPlaybackDesc = "Elimina silencios entre pistas consecutivas"
     override val audioNormalizationTitle = "Normalización de volumen"

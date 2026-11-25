@@ -188,6 +188,7 @@ data class MediaKnowledgeReport(
     val category: MediaKnowledgeCategory = MediaKnowledgeCategory.MUSIC,
     val artistName: String = "",
     val artistPhotoUrl: String? = null,
+    val albumCoverUrl: String? = null,
     val artistBio: String = "",
     val artistRole: String = "",
     val albumTitle: String = "",

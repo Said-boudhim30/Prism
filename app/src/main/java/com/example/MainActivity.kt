@@ -239,6 +239,9 @@ class MainActivity : ComponentActivity() {
     private var onPipPrevCallback: (() -> Unit)? = null
     private var onPipDismissStopAllCallback: (() -> Unit)? = null
     private var onAppBackgroundedCallback: (() -> Unit)? = null
+    private var lastPipParamsKey: String? = null
+    private val pipMainHandler = Handler(Looper.getMainLooper())
+    private var pendingEnterPipRunnable: Runnable? = null
 
     private val pipActionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -359,19 +362,35 @@ class MainActivity : ComponentActivity() {
                     onPipNextCallback = onNext
                     onPipPrevCallback = onPrev
                     onPipDismissStopAllCallback = onStopAll
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val paramsKey = "$autoEnter|$playing|$videoMode|$photoMode"
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && paramsKey != lastPipParamsKey) {
+                        lastPipParamsKey = paramsKey
                         runCatching {
                             setPictureInPictureParams(buildPipParams(autoEnter, playing, videoMode, photoMode))
                         }
                     }
                 },
                 onEnterPipNow = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        runCatching {
-                            enterPictureInPictureMode(
-                                buildPipParams(shouldAutoEnterPip, isPipPlaying, isPipVideo, isPipPhoto)
-                            )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                        !isFinishing &&
+                        !isDestroyed &&
+                        !isInPictureInPictureMode
+                    ) {
+                        // Defer PiP transition briefly so any open ModalBottomSheet / Popup detaches cleanly
+                        // before WindowManager resizes the Activity window (prevents Compose/WM ANR freeze!).
+                        pendingEnterPipRunnable?.let { pipMainHandler.removeCallbacks(it) }
+                        val runnable = Runnable {
+                            pendingEnterPipRunnable = null
+                            if (!isFinishing && !isDestroyed && !isInPictureInPictureMode) {
+                                runCatching {
+                                    enterPictureInPictureMode(
+                                        buildPipParams(shouldAutoEnterPip, isPipPlaying, isPipVideo, isPipPhoto)
+                                    )
+                                }
+                            }
                         }
+                        pendingEnterPipRunnable = runnable
+                        pipMainHandler.postDelayed(runnable, 90L)
                     }
                 },
                 onRegisterBackgroundLock = { callback ->
@@ -399,6 +418,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        pendingEnterPipRunnable?.let { pipMainHandler.removeCallbacks(it) }
+        pendingEnterPipRunnable = null
         super.onDestroy()
         runCatching { unregisterReceiver(pipActionReceiver) }
     }
@@ -711,6 +732,20 @@ fun PrismAppRoot(
     var showProAudioStudio by remember { mutableStateOf(false) }
     val customStudioPresets by viewModel.customStudioPresets.collectAsStateWithLifecycle()
     val detectedAutoStudioProfile by viewModel.detectedAutoStudioProfile.collectAsStateWithLifecycle()
+
+    // Automatically dismiss any transient modal sheets/dialogs when entering PiP so no stale Dialog window blocks PiP
+    LaunchedEffect(isInPipMode) {
+        if (isInPipMode) {
+            showMiniEqSheet = false
+            showMiniTimerSheet = false
+            showMiniQueueSheet = false
+            showPlayerCustomizerSheet = false
+            showSmartImportSheet = false
+            showQuickCustomizer = false
+            showProAudioStudio = false
+            showLockScreenOverlay = false
+        }
+    }
 
     val openDefaultPlayerSettings: () -> Unit = {
         val pkgUri = Uri.fromParts("package", context.packageName, null)
@@ -1039,55 +1074,16 @@ fun PrismAppRoot(
             showFormatBadges = settings.showFormatBadges,
             accentStrength = settings.accentStrength
         ) {
-            // Dedicated clean PiP view when Android shrinks the app into Picture-in-Picture
-            if (isInPipMode) {
-                val pipVideo = activeVideo ?: floatingVideo
-                if (pipVideo != null) {
-                    VideoPlayerScreen(
-                        video = pipVideo,
-                        isInPipMode = true,
-                        strings = strings,
-                        initialPositionMs = if (activeVideo != null) activeVideoInitialPosMs else floatingVideoPosMs,
-                        defaultAspectIndex = settings.videoDefaultAspect,
-                        defaultSpeed = settings.videoDefaultSpeed,
-                        defaultLoop = settings.videoDefaultLoop,
-                        preferHardwareDecoding = settings.hardwareVideoAcceleration,
-                        seekStepSeconds = settings.seekStepSeconds,
-                        gesturesEnabled = settings.videoGesturesEnabled,
-                        doubleTapSeekEnabled = settings.videoDoubleTapSeekEnabled,
-                        defaultSubtitleSizeSp = settings.videoSubtitleSizeSp,
-                        defaultMirrorEnabled = settings.videoMirrorEnabled,
-                        autoHideSeconds = settings.videoAutoHideSeconds,
-                        onToggleMirror = viewModel::setVideoMirrorEnabled,
-                        onPlaybackActiveChanged = viewModel::setVideoPlayingActive,
-                        onRegisterPipToggle = { videoPipToggleCallback = it },
-                        onClose = viewModel::closeVideo
-                    )
-                } else if (activePipPhoto != null) {
-                    PipPhotoModeView(
-                        photo = activePipPhoto,
-                        strings = strings
-                    )
-                } else {
-                    PipAudioModeView(
-                        playbackState = playbackState,
-                        spectrumLevelsFlow = viewModel.spectrumLevels,
-                        strings = strings
-                    )
-                }
-                return@PrismTheme
-            }
-
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
             ) {
-                // Authentic Material You Living Ambient Backdrop (paused when Full Player or Video covers screen!)
+                // Authentic Material You Living Ambient Backdrop (paused when PiP, Full Player, or Video covers screen!)
                 MaterialLiquidAmbientBackdrop(
                     isDarkTheme = settings.darkTheme,
                     amoledBlack = settings.amoledBlack,
-                    isPlaying = playbackState.isPlaying && !playbackState.isPlayerExpanded && activeVideo == null,
+                    isPlaying = playbackState.isPlaying && !isInPipMode && !playbackState.isPlayerExpanded && activeVideo == null,
                     modifier = Modifier.fillMaxSize()
                 )
                 val isWideScreen = maxWidth >= 700.dp
@@ -1565,7 +1561,7 @@ fun PrismAppRoot(
                                 }
                             }
 
-                            // Draggable Floating In-App Video Window (with Sticky Edge-Dock Handle & Drag-to-X!)
+                            // Draggable Floating In-App Video Window (reuses the SAME ExoPlayer seamlessly in Android PiP!)
                             val miniVideo = floatingVideo
                             if (miniVideo != null && activeVideo == null) {
                                 FloatingInAppVideoWindow(
@@ -1577,6 +1573,7 @@ fun PrismAppRoot(
                                     onPlayingStateChanged = viewModel::setVideoPlayingActive,
                                     dockSide = settings.miniPlayerEdgeDockSide,
                                     containerHeightPx = containerHeightPx,
+                                    isInPipMode = isInPipMode,
                                     onDragStateChanged = { dragging, overX ->
                                         isDraggingFloatingWindow = dragging
                                         isHoveringDismissX = overX
@@ -1596,7 +1593,7 @@ fun PrismAppRoot(
 
                             // Draggable Floating In-App Photo Window (with Sticky Edge-Dock Handle & Drag-to-X!)
                             val miniPhoto = floatingPhoto
-                            if (miniPhoto != null && activePhotoIndex == null) {
+                            if (!isInPipMode && miniPhoto != null && activePhotoIndex == null) {
                                 FloatingInAppPhotoWindow(
                                     photo = miniPhoto,
                                     strings = strings,
@@ -1622,7 +1619,7 @@ fun PrismAppRoot(
                             }
 
                             // Draggable Floating Material You Audio Bubble (when user taps Float on player bar!)
-                            if (settings.miniPlayerFloating && playbackState.currentTrack != null) {
+                            if (!isInPipMode && settings.miniPlayerFloating && playbackState.currentTrack != null) {
                                 FloatingAudioBubbleWindow(
                                     playbackState = playbackState,
                                     settings = settings,
@@ -1651,53 +1648,55 @@ fun PrismAppRoot(
                             }
 
                             // Persistent Floating Mini-Player (Customizable + Compact/Float + Squiggly) + Floating Pill Nav
-                            Column(
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .fillMaxWidth(),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                FloatingMiniPlayer(
-                                    playbackState = playbackState,
-                                    settings = settings,
-                                    positionMsFlow = viewModel.playbackPositionMs,
-                                    spectrumLevelsFlow = viewModel.spectrumLevels,
-                                    strings = strings,
-                                    onExpand = { viewModel.setPlayerExpanded(true) },
-                                    onTogglePlayPause = viewModel::togglePlayPause,
-                                    onNext = viewModel::playNextAudio,
-                                    onPrevious = viewModel::playPreviousAudio,
-                                    onSeek = viewModel::seekAudio,
-                                    onSeekRelative = viewModel::seekRelative,
-                                    onToggleFavorite = { viewModel.toggleFavorite(it.id) },
-                                    onToggleShuffle = viewModel::toggleShuffle,
-                                    onCycleRepeat = viewModel::cycleRepeatMode,
-                                    onCycleSpeed = viewModel::cyclePlaybackSpeed,
-                                    onToggleAbLoop = viewModel::toggleAbLoopPoint,
-                                    onToggleCompact = { viewModel.setMiniPlayerCompact(!settings.miniPlayerCompact) },
-                                    onToggleFloating = { viewModel.setMiniPlayerFloating(!settings.miniPlayerFloating) },
-                                    onOpenCustomize = { showPlayerCustomizerSheet = true },
-                                    onOpenQuickEq = { showMiniEqSheet = true },
-                                    onOpenQuickTimer = { showMiniTimerSheet = true },
-                                    onOpenQueue = { showMiniQueueSheet = true },
-                                    modifier = if (isWideScreen) {
-                                        Modifier
-                                            .navigationBarsPadding()
-                                            .padding(bottom = 12.dp)
-                                    } else {
-                                        Modifier.padding(bottom = 2.dp)
-                                    }
-                                )
-
-                                if (!isWideScreen) {
-                                    FloatingPillNavBar(
-                                        selectedTab = selectedTab,
+                            if (!isInPipMode) {
+                                Column(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth(),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    FloatingMiniPlayer(
+                                        playbackState = playbackState,
+                                        settings = settings,
+                                        positionMsFlow = viewModel.playbackPositionMs,
+                                        spectrumLevelsFlow = viewModel.spectrumLevels,
                                         strings = strings,
-                                        iconStyle = settings.iconStyle,
-                                        navBarStyle = settings.navBarStyle,
-                                        tabOrder = settings.navTabOrder,
-                                        onSelectTab = viewModel::selectTab
+                                        onExpand = { viewModel.setPlayerExpanded(true) },
+                                        onTogglePlayPause = viewModel::togglePlayPause,
+                                        onNext = viewModel::playNextAudio,
+                                        onPrevious = viewModel::playPreviousAudio,
+                                        onSeek = viewModel::seekAudio,
+                                        onSeekRelative = viewModel::seekRelative,
+                                        onToggleFavorite = { viewModel.toggleFavorite(it.id) },
+                                        onToggleShuffle = viewModel::toggleShuffle,
+                                        onCycleRepeat = viewModel::cycleRepeatMode,
+                                        onCycleSpeed = viewModel::cyclePlaybackSpeed,
+                                        onToggleAbLoop = viewModel::toggleAbLoopPoint,
+                                        onToggleCompact = { viewModel.setMiniPlayerCompact(!settings.miniPlayerCompact) },
+                                        onToggleFloating = { viewModel.setMiniPlayerFloating(!settings.miniPlayerFloating) },
+                                        onOpenCustomize = { showPlayerCustomizerSheet = true },
+                                        onOpenQuickEq = { showMiniEqSheet = true },
+                                        onOpenQuickTimer = { showMiniTimerSheet = true },
+                                        onOpenQueue = { showMiniQueueSheet = true },
+                                        modifier = if (isWideScreen) {
+                                            Modifier
+                                                .navigationBarsPadding()
+                                                .padding(bottom = 12.dp)
+                                        } else {
+                                            Modifier.padding(bottom = 2.dp)
+                                        }
                                     )
+
+                                    if (!isWideScreen) {
+                                        FloatingPillNavBar(
+                                            selectedTab = selectedTab,
+                                            strings = strings,
+                                            iconStyle = settings.iconStyle,
+                                            navBarStyle = settings.navBarStyle,
+                                            tabOrder = settings.navTabOrder,
+                                            onSelectTab = viewModel::selectTab
+                                        )
+                                    }
                                 }
                             }
 
@@ -1716,7 +1715,7 @@ fun PrismAppRoot(
                 AudioReactiveEdgeGlowOverlay(
                     spectrumLevelsFlow = viewModel.spectrumLevels,
                     isPlaying = playbackState.isPlaying,
-                    enabled = settings.edgeGlowEnabled && !playbackState.isPlayerExpanded && activeVideo == null,
+                    enabled = settings.edgeGlowEnabled && !isInPipMode && !playbackState.isPlayerExpanded && activeVideo == null,
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -1919,11 +1918,12 @@ fun PrismAppRoot(
                         onRequestMusicPip = if (settings.pipMusicEnabled) onEnterPipNow else null,
                         onOpenProAudioStudio = { showProAudioStudio = true },
                         onToggleAutoStudio = viewModel::setAutoStudioMasteringEnabled,
-                        onToggleDspBypass = viewModel::setDspBypassEnabled
+                        onToggleDspBypass = viewModel::setDspBypassEnabled,
+                        onFetchCoverAndLyrics = viewModel::fetchCoverAndLyricsForTrack
                     )
                 }
 
-                // Smart Video Cinema Player Overlay
+                // Smart Video Cinema Player Overlay (Single persistent ExoPlayer — scales cleanly into PiP with ZERO teardown!)
                 val currentVideo = activeVideo
                 AnimatedVisibility(
                     visible = currentVideo != null,
@@ -1933,7 +1933,7 @@ fun PrismAppRoot(
                     if (currentVideo != null) {
                         VideoPlayerScreen(
                             video = currentVideo,
-                            isInPipMode = false,
+                            isInPipMode = isInPipMode,
                             strings = strings,
                             initialPositionMs = activeVideoInitialPosMs,
                             defaultAspectIndex = settings.videoDefaultAspect,
@@ -2685,6 +2685,22 @@ fun PrismAppRoot(
                     )
                 }
 
+                // Non-Destructive Topmost PiP Overlay for Photo & Music modes (Video scales its own persistent ExoPlayer cleanly!)
+                if (isInPipMode && activeVideo == null && floatingVideo == null) {
+                    if (activePipPhoto != null) {
+                        PipPhotoModeView(
+                            photo = activePipPhoto,
+                            strings = strings
+                        )
+                    } else {
+                        PipAudioModeView(
+                            playbackState = playbackState,
+                            spectrumLevelsFlow = viewModel.spectrumLevels,
+                            strings = strings
+                        )
+                    }
+                }
+
                 // Full-Screen App Lock PIN Vault Overlay (Topmost z-order gate blocking intruders)
                 if (isAppLocked) {
                     AppLockScreenOverlay(
@@ -2970,6 +2986,8 @@ private fun PrismSettingsTabHost(
     onOpenProAudioStudio: () -> Unit = {},
     onOpenDefaultPlayerSettings: () -> Unit = {},
 ) {
+    val isBatchEnriching by viewModel.isBatchEnriching.collectAsStateWithLifecycle()
+    val batchEnrichProgress by viewModel.batchEnrichProgress.collectAsStateWithLifecycle()
     SettingsScreen(
         settings = settings,
         playbackState = playbackState,
@@ -3136,6 +3154,9 @@ private fun PrismSettingsTabHost(
         onAccentStrengthChange = viewModel::setAccentStrength,
         onOpenQuickCustomizer = onOpenQuickCustomizer,
         onOpenProAudioStudio = onOpenProAudioStudio,
-        onOpenDefaultPlayerSettings = onOpenDefaultPlayerSettings
+        onOpenDefaultPlayerSettings = onOpenDefaultPlayerSettings,
+        isBatchEnriching = isBatchEnriching,
+        batchEnrichProgress = batchEnrichProgress,
+        onBatchAutoFetchMetadata = viewModel::batchAutoFetchLibraryMetadata
     )
 }
