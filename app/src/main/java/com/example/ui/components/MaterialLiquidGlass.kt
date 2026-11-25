@@ -263,7 +263,7 @@ fun MaterialLiquidAmbientBackdrop(
     }
 
     val infiniteTransition = rememberInfiniteTransition(label = "liquidAmbientMesh")
-    val phase by infiniteTransition.animateFloat(
+    val phaseState = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = (2f * PI).toFloat(),
         animationSpec = infiniteRepeatable(
@@ -290,24 +290,16 @@ fun MaterialLiquidAmbientBackdrop(
     val c2 = cs.tertiary.copy(alpha = alphaFactor * 0.96f)
     val c3 = cs.secondary.copy(alpha = alphaFactor * 0.80f)
     val c4 = cs.primaryContainer.copy(alpha = alphaFactor * 0.85f)
-    val moteColorPrimary = cs.primary.copy(alpha = (if (isPlaying) 0.28f else 0.16f) * accentStrength.coerceAtMost(1.25f))
-    val moteColorTertiary = cs.tertiary.copy(alpha = (if (isPlaying) 0.24f else 0.14f) * accentStrength.coerceAtMost(1.25f))
-    val moteColorWhite = Color.White.copy(alpha = if (isDarkTheme) (if (isPlaying) 0.16f else 0.09f) else 0.12f)
+    val moteColorPrimary = cs.primary.copy(alpha = (if (isPlaying) 0.26f else 0.14f) * accentStrength.coerceAtMost(1.25f))
+    val moteColorTertiary = cs.tertiary.copy(alpha = (if (isPlaying) 0.22f else 0.12f) * accentStrength.coerceAtMost(1.25f))
+    val moteColorWhite = Color.White.copy(alpha = if (isDarkTheme) (if (isPlaying) 0.14f else 0.08f) else 0.10f)
 
-    val blurModifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && intensity > 0.15f) {
-        Modifier.blur((18.dp * intensity).coerceAtLeast(4.dp))
-    } else {
-        Modifier
-    }
-
+    // Radial gradients are already soft natively; skipping full-screen RenderEffect blur prevents GPU/ANR stalls
     Box(modifier = modifier.background(cs.background)) {
         when (backdropStyle) {
             com.example.model.BackdropAnimationStyle.SUBTLE_MIST -> {
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(blurModifier)
-                ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val phase = phaseState.value
                     val w = size.width
                     val h = size.height
                     val topCenter = Offset(w * (0.5f + 0.14f * cos(phase)), h * 0.14f)
@@ -334,11 +326,8 @@ fun MaterialLiquidAmbientBackdrop(
             }
 
             com.example.model.BackdropAnimationStyle.PRISM_RIBBON -> {
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(blurModifier)
-                ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val phase = phaseState.value
                     val w = size.width
                     val h = size.height
                     val driftA = 0.16f * sin(phase)
@@ -371,12 +360,9 @@ fun MaterialLiquidAmbientBackdrop(
             }
 
             else -> {
-                // AURORA_ORBS: Living Dreamlike Aurora Mesh Orbs + Ethereal Bokeh Motes
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(blurModifier)
-                ) {
+                // AURORA_ORBS: Living Dreamlike Aurora Mesh Orbs + Lightweight Bokeh Motes (draw-phase only)
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val phase = phaseState.value
                     val w = size.width
                     val h = size.height
                     val orb1 = Offset(
@@ -436,9 +422,10 @@ fun MaterialLiquidAmbientBackdrop(
 
                 if (!amoledBlack && intensity > 0.18f) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
+                        val phase = phaseState.value
                         val w = size.width
                         val h = size.height
-                        val moteCount = 14
+                        val moteCount = 8
                         for (i in 0 until moteCount) {
                             val seed = i * 1.6180339f
                             val baseX = ((seed * 0.37f) % 1f)
@@ -496,7 +483,7 @@ fun AudioReactiveEdgeGlowOverlay(
 
     val cs = MaterialTheme.colorScheme
     val sweepTransition = rememberInfiniteTransition(label = "edgeGlowSweep")
-    val shift by sweepTransition.animateFloat(
+    val shiftState = sweepTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -507,6 +494,7 @@ fun AudioReactiveEdgeGlowOverlay(
     )
 
     Canvas(modifier = modifier.fillMaxSize()) {
+        val shift = shiftState.value
         val alpha = (0.14f + smoothEnergy * 0.42f).coerceIn(0.12f, 0.62f)
         val strokePx = (4.dp.toPx() + smoothEnergy * 7.dp.toPx())
         val brush = Brush.linearGradient(

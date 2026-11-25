@@ -9,6 +9,7 @@ import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
 import com.example.R
 import com.example.model.AudioTrack
+import com.example.model.DiscoveredSubfolder
 import com.example.model.DuplicateGroup
 import com.example.model.DuplicateMediaType
 import com.example.model.PhotoItem
@@ -101,17 +102,98 @@ object MediaScanner {
     }
 
     /**
+     * Fast inspection of an existing user-granted folder tree: returns the root folder plus
+     * its existing subfolders (up to [maxDepth]) with direct media file counts so the user can
+     * pick exact folders with Checkboxes before confirming a strictly scoped scan.
+     */
+    suspend fun inspectTreeSubfolders(
+        context: Context,
+        treeUri: Uri,
+        maxDepth: Int = 2,
+    ): List<DiscoveredSubfolder> = withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
+        val treeUriStr = treeUri.toString()
+        val rootDisplayName = resolveFolderDisplayName(context, treeUri)
+        val rootDocId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull()
+            ?: return@withContext emptyList()
+
+        data class InspectNode(val docId: String, val name: String, val path: String, val depth: Int)
+        val queue = ArrayDeque<InspectNode>()
+        queue.add(InspectNode(rootDocId, rootDisplayName, rootDisplayName, 0))
+        val discovered = mutableListOf<DiscoveredSubfolder>()
+        val maxFolders = 48
+
+        while (queue.isNotEmpty() && discovered.size < maxFolders) {
+            val current = queue.removeFirst()
+            var directMedia = 0
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, current.docId)
+            try {
+                resolver.query(childrenUri, docProjection, null, null, null)?.use { cursor ->
+                    val idIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    val mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+
+                    while (cursor.moveToNext()) {
+                        val childDocId = if (idIdx >= 0) cursor.getString(idIdx) else continue
+                        val displayName = (if (nameIdx >= 0) cursor.getString(nameIdx) else null) ?: continue
+                        if (displayName.startsWith(".")) continue
+                        val mimeRaw = if (mimeIdx >= 0) cursor.getString(mimeIdx) else null
+                        if (mimeRaw == DocumentsContract.Document.MIME_TYPE_DIR) {
+                            if (current.depth < maxDepth &&
+                                !displayName.equals("Android", ignoreCase = true) &&
+                                !displayName.equals("LOST.DIR", ignoreCase = true)
+                            ) {
+                                queue.add(
+                                    InspectNode(
+                                        docId = childDocId,
+                                        name = displayName,
+                                        path = "${current.path}/$displayName",
+                                        depth = current.depth + 1
+                                    )
+                                )
+                            }
+                        } else {
+                            val ext = displayName.substringAfterLast('.', "").uppercase(Locale.US)
+                            val mime = mimeRaw?.lowercase(Locale.US) ?: inferMimeFromExtension(ext)
+                            val normExt = normalizeExtension(ext, mime)
+                            if (mime.startsWith("audio/") || mime.startsWith("video/") || mime.startsWith("image/") ||
+                                normExt in audioExtensions || normExt in videoExtensions || normExt in photoExtensions
+                            ) {
+                                directMedia++
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // Skip unreadable dir cleanly
+            }
+            discovered += DiscoveredSubfolder(
+                treeUriString = treeUriStr,
+                docId = current.docId,
+                displayName = current.name,
+                parentPath = current.path,
+                isRoot = current.depth == 0,
+                directMediaCount = directMedia,
+            )
+        }
+        discovered
+    }
+
+    /**
      * Phase 1 — Ultra-Fast Single-Query-Per-Directory SAF Traversal.
-     * Uses DocumentsContract.buildChildDocumentsUriUsingTree instead of slow DocumentFile.listFiles()
-     * (20x-50x faster: 1 IPC call per directory instead of 5 IPC calls per file).
-     * Reuses cached metadata whenever (uri + sizeBytes + dateModifiedMs) match!
-     * Emits progressive batches via [onBatchDiscovered] so files appear in UI immediately (<150ms).
+     * When [allowedDocIds] is non-null and non-empty, scans ONLY those exact checked folders
+     * (never scanning outside the user's checkboxes!). Also respects [includeAudio], [includeVideo],
+     * and [includePhoto] scope filters.
      */
     suspend fun scanFolderTreeFast(
         context: Context,
         treeUri: Uri,
         favoriteIds: Set<String> = emptySet(),
         cacheLookup: CachedMediaLookup = CachedMediaLookup(),
+        allowedDocIds: Set<String>? = null,
+        includeAudio: Boolean = true,
+        includeVideo: Boolean = true,
+        includePhoto: Boolean = true,
         onBatchDiscovered: (suspend (ScannedMediaResult, Int) -> Unit)? = null,
     ): ScannedMediaResult = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
@@ -119,6 +201,7 @@ object MediaScanner {
         val rootDisplayName = resolveFolderDisplayName(context, treeUri)
         val rootDocId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull()
             ?: return@withContext ScannedMediaResult()
+        val strictScope = !allowedDocIds.isNullOrEmpty()
 
         val audioAll = mutableListOf<AudioTrack>()
         val videosAll = mutableListOf<VideoItem>()
@@ -150,7 +233,15 @@ object MediaScanner {
 
         data class DirNode(val docId: String, val folderName: String, val depth: Int)
         val queue = ArrayDeque<DirNode>()
-        queue.add(DirNode(rootDocId, rootDisplayName, 0))
+        if (strictScope && allowedDocIds != null) {
+            // Strictly enqueue ONLY the user-checked folders (never scan unchecked folders!)
+            allowedDocIds.forEach { checkedDocId ->
+                val name = extractFolderNameFromDocId(checkedDocId).ifBlank { rootDisplayName }
+                queue.add(DirNode(checkedDocId, name, 0))
+            }
+        } else {
+            queue.add(DirNode(rootDocId, rootDisplayName, 0))
+        }
 
         while (queue.isNotEmpty()) {
             val current = queue.removeFirst()
@@ -173,7 +264,8 @@ object MediaScanner {
 
                         val mimeRaw = if (mimeIdx >= 0) cursor.getString(mimeIdx) else null
                         if (mimeRaw == DocumentsContract.Document.MIME_TYPE_DIR) {
-                            // Skip heavy Android system cache directories if user picked root storage
+                            // In strict checkbox scope, NEVER descend into unchecked subfolders!
+                            if (strictScope) continue
                             if (current.depth <= 1 && (displayName.equals("Android", ignoreCase = true) ||
                                         displayName.equals("LOST.DIR", ignoreCase = true))
                             ) {
@@ -194,7 +286,7 @@ object MediaScanner {
                         val isFav = favoriteIds.contains(uriStr)
 
                         when {
-                            mime.startsWith("image/") || normalizedExt in photoExtensions -> {
+                            includePhoto && (mime.startsWith("image/") || normalizedExt in photoExtensions) -> {
                                 val cached = cacheLookup.photoById[uriStr]
                                 val item = if (cached != null &&
                                     cached.sizeBytes == sizeBytes &&
@@ -226,7 +318,7 @@ object MediaScanner {
                                 totalFound++
                             }
 
-                            mime.startsWith("video/") || (normalizedExt in videoExtensions && !mime.startsWith("audio/")) -> {
+                            includeVideo && (mime.startsWith("video/") || (normalizedExt in videoExtensions && !mime.startsWith("audio/"))) -> {
                                 val cached = cacheLookup.videoById[uriStr]
                                 val item = if (cached != null &&
                                     cached.sizeBytes == sizeBytes &&
@@ -259,7 +351,7 @@ object MediaScanner {
                                 totalFound++
                             }
 
-                            mime.startsWith("audio/") || normalizedExt in audioExtensions -> {
+                            includeAudio && (mime.startsWith("audio/") || normalizedExt in audioExtensions) -> {
                                 val cached = cacheLookup.audioById[uriStr]
                                 val item = if (cached != null &&
                                     cached.sizeBytes == sizeBytes &&

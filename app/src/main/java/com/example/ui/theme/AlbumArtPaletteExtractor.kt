@@ -35,12 +35,15 @@ object AlbumArtPaletteExtractor {
         val key = "${track.id}:${track.artworkResId ?: 0}:${track.uriString}"
         cache[key]?.let { return it }
 
-        return withContext(Dispatchers.Default) {
-            val bitmap = decodeSmallSampleBitmap(context, track) ?: return@withContext null
-            val palette = extractFromBitmap(bitmap)
-            if (cache.size > 64) cache.clear()
-            cache[key] = palette
-            palette
+        return kotlinx.coroutines.withTimeoutOrNull(1500L) {
+            withContext(Dispatchers.IO) {
+                val bitmap = decodeSmallSampleBitmap(context, track) ?: return@withContext null
+                val palette = extractFromBitmap(bitmap)
+                runCatching { bitmap.recycle() }
+                if (cache.size > 64) cache.clear()
+                cache[key] = palette
+                palette
+            }
         }
     }
 

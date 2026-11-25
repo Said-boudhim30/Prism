@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -325,24 +327,15 @@ fun FullPlayerSheet(
     )
     val dismissScale = (1f - (animatedDragY / 2600f).coerceIn(0f, 0.08f))
 
-    val infiniteTransition = rememberInfiniteTransition(label = "fullPlayerSpin")
-    val spinAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(16000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "fullSpin"
-    )
-
-    val gradientBackdrop = Brush.verticalGradient(
-        colors = listOf(
-            dynamicAccentTint.copy(alpha = if (settings.darkTheme) 0.30f else 0.22f),
-            dynamicDeepTint.copy(alpha = if (settings.darkTheme) 0.56f else 0.26f),
-            dynamicSecondaryGlow.copy(alpha = if (settings.darkTheme) 0.26f else 0.14f),
+    val gradientBackdrop = remember(dynamicAccentTint, dynamicDeepTint, dynamicSecondaryGlow, settings.darkTheme) {
+        Brush.verticalGradient(
+            colors = listOf(
+                dynamicAccentTint.copy(alpha = if (settings.darkTheme) 0.30f else 0.22f),
+                dynamicDeepTint.copy(alpha = if (settings.darkTheme) 0.56f else 0.26f),
+                dynamicSecondaryGlow.copy(alpha = if (settings.darkTheme) 0.26f else 0.14f),
+            )
         )
-    )
+    }
 
     val abLabel = when {
         playbackState.abLoopStartMs != null && playbackState.abLoopEndMs != null -> strings.abLoopActive
@@ -364,12 +357,6 @@ fun FullPlayerSheet(
         color = MaterialTheme.colorScheme.surface
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            MaterialLiquidAmbientBackdrop(
-                isDarkTheme = settings.darkTheme,
-                amoledBlack = settings.amoledBlack,
-                isPlaying = playbackState.isPlaying,
-                modifier = Modifier.fillMaxSize()
-            )
             // Full-Screen Uncluttered 3-Zone Stage: Top Bar -> Centered Expressive Hero -> Pinned Bottom Deck
             Column(
                 modifier = Modifier
@@ -507,135 +494,99 @@ fun FullPlayerSheet(
                     }
                 }
 
-                // ZONE 2: Enlarged, Flagship Centered Material 3 Expressive Artwork Hero + Clean Title + Optional Spectrum
-                BoxWithConstraints(
+                // ZONE 2: Enlarged, Flagship Centered Material 3 Expressive Artwork Hero (Zero subcomposition)
+                Column(
                     modifier = Modifier
                         .weight(1f)
                         .widthIn(max = 560.dp)
                         .fillMaxWidth(),
-                    contentAlignment = Alignment.Center
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    val heroOuterSize = minOf(maxWidth - 8.dp, maxHeight * 0.68f).coerceIn(256.dp, 344.dp)
-                    val artCardSize = (heroOuterSize - 16.dp).coerceIn(240.dp, 324.dp)
+                    var artSwipeAccum by remember(track.id) { mutableFloatStateOf(0f) }
+                    val artShape = remember(settings.playerArtworkStyle, settings.shapeRoundness) {
+                        PrismExpressiveShapes.artworkShapeFor(settings.playerArtworkStyle, settings.shapeRoundness)
+                    }
+                    val artShadowDp = if (PrismExpressiveShapes.usesGenericOutline(settings.playerArtworkStyle)) 0.dp else 16.dp
 
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                    Box(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .sizeIn(minWidth = 200.dp, minHeight = 200.dp, maxWidth = 316.dp, maxHeight = 316.dp)
+                            .aspectRatio(1f)
+                            .then(
+                                if (settings.playerGestureSwipeArt) {
+                                    Modifier.pointerInput(track.id) {
+                                        detectHorizontalDragGestures(
+                                            onDragEnd = {
+                                                if (artSwipeAccum < -75f) {
+                                                    if (hapticsEnabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onNext()
+                                                } else if (artSwipeAccum > 75f) {
+                                                    if (hapticsEnabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onPrevious()
+                                                }
+                                                artSwipeAccum = 0f
+                                            },
+                                            onDragCancel = { artSwipeAccum = 0f },
+                                            onHorizontalDrag = { _, dragAmount -> artSwipeAccum += dragAmount }
+                                        )
+                                    }
+                                } else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        var artSwipeAccum by remember(track.id) { mutableFloatStateOf(0f) }
-                        val artShape = PrismExpressiveShapes.artworkShapeFor(settings.playerArtworkStyle, settings.shapeRoundness)
-
+                        // Living Genre-Reactive Aura Halo behind artwork
                         Box(
                             modifier = Modifier
-                                .size(heroOuterSize)
-                                .then(
-                                    if (settings.playerGestureSwipeArt) {
-                                        Modifier.pointerInput(track.id) {
-                                            detectHorizontalDragGestures(
-                                                onDragEnd = {
-                                                    if (artSwipeAccum < -75f) {
-                                                        if (hapticsEnabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                        onNext()
-                                                    } else if (artSwipeAccum > 75f) {
-                                                        if (hapticsEnabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                        onPrevious()
-                                                    }
-                                                    artSwipeAccum = 0f
-                                                },
-                                                onDragCancel = { artSwipeAccum = 0f },
-                                                onHorizontalDrag = { _, dragAmount -> artSwipeAccum += dragAmount }
-                                            )
-                                        }
-                                    } else Modifier
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // Living Genre-Reactive Aura Halo behind artwork
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.radialGradient(
-                                            colors = listOf(
-                                                dynamicAccentTint.copy(alpha = if (playbackState.isPlaying) 0.46f else 0.24f),
-                                                dynamicSecondaryGlow.copy(alpha = 0.22f),
-                                                Color.Transparent
-                                            )
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.radialGradient(
+                                        colors = listOf(
+                                            dynamicAccentTint.copy(alpha = if (playbackState.isPlaying) 0.44f else 0.24f),
+                                            dynamicSecondaryGlow.copy(alpha = 0.20f),
+                                            Color.Transparent
                                         )
                                     )
-                            )
+                                )
+                        )
 
-                            when (settings.playerArtworkStyle) {
-                                PlayerArtworkStyle.VINYL_DISC -> {
-                                    Surface(
-                                        shape = CircleShape,
-                                        tonalElevation = 14.dp,
-                                        shadowElevation = 24.dp,
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        border = BorderStroke(2.dp, dynamicAccentTint.copy(alpha = 0.52f)),
+                        when (settings.playerArtworkStyle) {
+                            PlayerArtworkStyle.VINYL_DISC -> {
+                                SpinningVinylDiscLeaf(
+                                    track = track,
+                                    isPlaying = playbackState.isPlaying,
+                                    accentTint = dynamicAccentTint,
+                                    deepTint = dynamicDeepTint,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(10.dp)
+                                )
+                            }
+                            else -> {
+                                val framePad = if (settings.playerArtworkStyle == PlayerArtworkStyle.CIRCLE_GLOW) 14.dp else 8.dp
+                                Surface(
+                                    shape = artShape,
+                                    tonalElevation = 10.dp,
+                                    shadowElevation = artShadowDp,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    border = BorderStroke(2.dp, dynamicAccentTint.copy(alpha = 0.54f)),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(framePad)
+                                        .testTag("full_player_artwork_${settings.playerArtworkStyle.name.lowercase()}")
+                                ) {
+                                    TrackArtworkImage(
+                                        track = track,
                                         modifier = Modifier
-                                            .size(artCardSize)
-                                            .testTag("full_player_artwork_vinyl")
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(10.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            TrackArtworkImage(
-                                                track = track,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .rotate(if (playbackState.isPlaying) spinAngle else 0f)
-                                                    .clip(CircleShape)
-                                            )
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = dynamicDeepTint,
-                                                border = BorderStroke(2.dp, dynamicAccentTint.copy(alpha = 0.72f)),
-                                                modifier = Modifier.size(50.dp)
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(16.dp)
-                                                            .clip(CircleShape)
-                                                            .background(dynamicAccentTint)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                else -> {
-                                    val frameSize = if (settings.playerArtworkStyle == PlayerArtworkStyle.CIRCLE_GLOW) {
-                                        (artCardSize - 12.dp).coerceAtLeast(228.dp)
-                                    } else {
-                                        artCardSize
-                                    }
-                                    Surface(
-                                        shape = artShape,
-                                        tonalElevation = 14.dp,
-                                        shadowElevation = 24.dp,
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        border = BorderStroke(2.dp, dynamicAccentTint.copy(alpha = 0.54f)),
-                                        modifier = Modifier
-                                            .size(frameSize)
-                                            .testTag("full_player_artwork_${settings.playerArtworkStyle.name.lowercase()}")
-                                    ) {
-                                        TrackArtworkImage(
-                                            track = track,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clip(artShape)
-                                        )
-                                    }
+                                            .fillMaxSize()
+                                            .clip(artShape)
+                                    )
                                 }
                             }
                         }
+                    }
 
                         Spacer(modifier = Modifier.height(20.dp))
 
@@ -705,7 +656,6 @@ fun FullPlayerSheet(
                             }
                         )
                     }
-                    }
                 }
 
                 // ZONE 3: Bottom-Anchored Seek Bar + Main Transport Controls + Whisper-Quiet Micro Strip
@@ -766,13 +716,14 @@ fun FullPlayerSheet(
                             }
                         }
 
-                        // Expressive Shape-Morphing Genre-Tinted Play/Pause Button
-                        val playShape = if (settings.playerExpressivePlayMorph && playbackState.isPlaying) {
-                            PrismExpressiveShapes.scallopedCookie(lobes = 10, depth = 0.055f)
-                        } else if (settings.playerExpressivePlayMorph) {
-                            RoundedCornerShape(26.dp)
-                        } else {
-                            CircleShape
+                        // Expressive Shape-Morphing Genre-Tinted Play/Pause Button (cached shape, zero concave shadow stall)
+                        val isScallopedPlay = settings.playerExpressivePlayMorph && playbackState.isPlaying
+                        val playShape = remember(settings.playerExpressivePlayMorph, playbackState.isPlaying) {
+                            when {
+                                isScallopedPlay -> PrismExpressiveShapes.scallopedCookie(lobes = 10, depth = 0.055f)
+                                settings.playerExpressivePlayMorph -> RoundedCornerShape(26.dp)
+                                else -> CircleShape
+                            }
                         }
                         Surface(
                             onClick = {
@@ -781,7 +732,7 @@ fun FullPlayerSheet(
                             },
                             shape = playShape,
                             color = dynamicAccentTint,
-                            shadowElevation = 14.dp,
+                            shadowElevation = if (isScallopedPlay) 0.dp else 10.dp,
                             modifier = Modifier
                                 .size(if (driveBig) 96.dp else 80.dp)
                                 .testTag("full_player_play_pause")
@@ -2034,3 +1985,72 @@ private fun FullPlayerSeekLeaf(
         }
     }
 }
+
+/**
+ * Isolated draw-phase-only spinning vinyl artwork leaf (0 recompositions/second).
+ */
+@Composable
+private fun SpinningVinylDiscLeaf(
+    track: AudioTrack,
+    isPlaying: Boolean,
+    accentTint: Color,
+    deepTint: Color,
+    modifier: Modifier = Modifier,
+) {
+    val angleState = if (isPlaying) {
+        val infinite = rememberInfiniteTransition(label = "vinylLeafSpin")
+        infinite.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(16000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "vinylLeafAngle"
+        )
+    } else {
+        null
+    }
+
+    Surface(
+        shape = CircleShape,
+        tonalElevation = 10.dp,
+        shadowElevation = 16.dp,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(2.dp, accentTint.copy(alpha = 0.52f)),
+        modifier = modifier.testTag("full_player_artwork_vinyl")
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            TrackArtworkImage(
+                track = track,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        rotationZ = angleState?.value ?: 0f
+                    }
+                    .clip(CircleShape)
+            )
+            Surface(
+                shape = CircleShape,
+                color = deepTint,
+                border = BorderStroke(2.dp, accentTint.copy(alpha = 0.72f)),
+                modifier = Modifier.size(50.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(accentTint)
+                    )
+                }
+            }
+        }
+    }
+}
+

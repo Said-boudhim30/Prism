@@ -2470,6 +2470,12 @@ class SettingsRepository(private val context: Context) {
                         put("video", f.videoCount)
                         put("photo", f.photoCount)
                         put("scanned", f.lastScannedMs)
+                        val subArr = JSONArray()
+                        f.selectedSubfolderDocIds.forEach { subArr.put(it) }
+                        put("subIds", subArr)
+                        put("incAudio", f.includeAudio)
+                        put("incVideo", f.includeVideo)
+                        put("incPhoto", f.includePhoto)
                     }
                 )
             }
@@ -2484,6 +2490,15 @@ class SettingsRepository(private val context: Context) {
                         val o = arr.optJSONObject(i) ?: continue
                         val uri = o.optString("uri")
                         if (uri.isBlank()) continue
+                        val subArr = o.optJSONArray("subIds")
+                        val subIds = buildList {
+                            if (subArr != null) {
+                                for (j in 0 until subArr.length()) {
+                                    val id = subArr.optString(j)
+                                    if (id.isNotBlank()) add(id)
+                                }
+                            }
+                        }
                         add(
                             WatchedFolder(
                                 uriString = uri,
@@ -2493,6 +2508,10 @@ class SettingsRepository(private val context: Context) {
                                 videoCount = o.optInt("video", 0),
                                 photoCount = o.optInt("photo", 0),
                                 lastScannedMs = o.optLong("scanned", 0L),
+                                selectedSubfolderDocIds = subIds,
+                                includeAudio = o.optBoolean("incAudio", true),
+                                includeVideo = o.optBoolean("incVideo", true),
+                                includePhoto = o.optBoolean("incPhoto", true),
                             )
                         )
                     }

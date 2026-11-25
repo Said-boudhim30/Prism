@@ -117,7 +117,9 @@ fun SettingsPagedDeck(
                         Text(
                             text = "${idx + 1}. $label",
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     },
                     shape = CircleShape,
@@ -138,6 +140,7 @@ fun SettingsPagedDeck(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 2.dp)
+                    .clip(RoundedCornerShape(22.dp))
             ) {
                 Column(
                     modifier = Modifier
@@ -158,7 +161,10 @@ fun SettingsPagedDeck(
             Text(
                 text = strings.swipeHintLabel,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -645,12 +651,16 @@ private fun WidgetMetaHeader(title: String, subtitle: String) {
             text = title,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         Text(
             text = subtitle,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

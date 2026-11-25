@@ -86,9 +86,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -273,17 +273,6 @@ fun FloatingMiniPlayer(
             val seekStepSec = settings.seekStepSeconds.coerceIn(5, 30)
             val seekStepMs = seekStepSec * 1000L
 
-            val infiniteTransition = rememberInfiniteTransition(label = "discRotation")
-            val rotation by infiniteTransition.animateFloat(
-                initialValue = 0f,
-                targetValue = 360f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 8000, easing = LinearEasing),
-                    repeatMode = RepeatMode.Restart
-                ),
-                label = "discAngle"
-            )
-
             val discSize by animateDpAsState(
                 targetValue = if (compact) 38.dp else 52.dp,
                 animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMedium),
@@ -393,26 +382,13 @@ fun FloatingMiniPlayer(
                             .padding(horizontal = 10.dp, vertical = verticalPad),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Spinning Vinyl Disc
-                        Box(
-                            modifier = Modifier
-                                .size(discSize)
-                                .rotate(if (playbackState.isPlaying) rotation else 0f)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            TrackArtworkImage(
-                                track = track,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(if (compact) 8.dp else 11.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            )
-                        }
+                        // Isolated draw-phase Spinning Vinyl Disc (0 recompositions/sec)
+                        MiniSpinningDiscLeaf(
+                            track = track,
+                            isPlaying = playbackState.isPlaying,
+                            discSize = discSize,
+                            compact = compact
+                        )
 
                         Spacer(modifier = Modifier.width(10.dp))
 
@@ -1149,3 +1125,48 @@ fun TrackArtworkImage(
         }
     }
 }
+
+@Composable
+private fun MiniSpinningDiscLeaf(
+    track: AudioTrack,
+    isPlaying: Boolean,
+    discSize: androidx.compose.ui.unit.Dp,
+    compact: Boolean,
+) {
+    val angleState = if (isPlaying) {
+        val infinite = rememberInfiniteTransition(label = "miniDiscSpin")
+        infinite.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 8000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "miniDiscAngle"
+        )
+    } else {
+        null
+    }
+    Box(
+        modifier = Modifier
+            .size(discSize)
+            .graphicsLayer {
+                rotationZ = angleState?.value ?: 0f
+            }
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primaryContainer),
+        contentAlignment = Alignment.Center
+    ) {
+        TrackArtworkImage(
+            track = track,
+            modifier = Modifier.fillMaxSize()
+        )
+        Box(
+            modifier = Modifier
+                .size(if (compact) 8.dp else 11.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+        )
+    }
+}
+

@@ -25,6 +25,7 @@ import com.example.model.AppSettings
 import com.example.model.AudioDeviceProfile
 import com.example.model.AudioOutputProfileType
 import com.example.model.AudioTrack
+import com.example.model.DiscoveredSubfolder
 import com.example.model.DuplicateGroup
 import com.example.model.DuplicateMediaType
 import com.example.model.EdgeDockSide
@@ -154,6 +155,12 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _scanProgress = MutableStateFlow(ScanProgressState())
     val scanProgress: StateFlow<ScanProgressState> = _scanProgress.asStateFlow()
+
+    private val _discoveredChecklistFolders = MutableStateFlow<List<DiscoveredSubfolder>>(emptyList())
+    val discoveredChecklistFolders: StateFlow<List<DiscoveredSubfolder>> = _discoveredChecklistFolders.asStateFlow()
+
+    private val _isInspectingFolders = MutableStateFlow(false)
+    val isInspectingFolders: StateFlow<Boolean> = _isInspectingFolders.asStateFlow()
 
     private val _showFirstLaunchFolderWizard = MutableStateFlow(false)
     val showFirstLaunchFolderWizard: StateFlow<Boolean> = _showFirstLaunchFolderWizard.asStateFlow()
@@ -931,6 +938,10 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
                     treeUri = Uri.parse(folder.uriString),
                     favoriteIds = favs,
                     cacheLookup = cacheLookup,
+                    allowedDocIds = folder.selectedSubfolderDocIds.takeIf { it.isNotEmpty() }?.toSet(),
+                    includeAudio = folder.includeAudio,
+                    includeVideo = folder.includeVideo,
+                    includePhoto = folder.includePhoto,
                     onBatchDiscovered = { batch, _ ->
                         runningCount += batch.audioTracks.size + batch.videos.size + batch.photos.size
                         _scanProgress.value = _scanProgress.value.copy(discoveredCount = runningCount)
@@ -1255,8 +1266,249 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Step 1 of Selective Folder Scanning: takes persistent SAF read permission on the
+     * user-picked existing device folder and quickly discovers the folder + its existing
+     * subfolders WITHOUT scanning media yet — waiting for the user's Checkbox confirmation.
+     */
+    fun inspectGrantedFolderForChecklist(treeUri: Uri) {
+        viewModelScope.launch {
+            _isInspectingFolders.value = true
+            runCatching {
+                getApplication<Application>().contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            val inspected = runCatching {
+                MediaScanner.inspectTreeSubfolders(getApplication(), treeUri, maxDepth = 2)
+            }.getOrDefault(emptyList())
+            val uriStr = treeUri.toString()
+            val merged = (_discoveredChecklistFolders.value.filterNot { it.treeUriString == uriStr } + inspected)
+                .distinctBy { it.selectionKey }
+            _discoveredChecklistFolders.value = merged
+            _isInspectingFolders.value = false
+        }
+    }
+
+    /**
+     * Loads all previously granted SAF folders (both saved watchedFolders and persisted
+     * Android URI grants) into the interactive Checkbox checklist so the user can check or
+     * uncheck exact existing device folders anytime.
+     */
+    fun loadGrantedFoldersForChecklist() {
+        viewModelScope.launch {
+            _isInspectingFolders.value = true
+            val app = getApplication<Application>()
+            val urisToInspect = linkedSetOf<String>()
+            settingsRepo.getWatchedFolders().forEach { urisToInspect.add(it.uriString) }
+            runCatching {
+                app.contentResolver.persistedUriPermissions
+                    .filter { it.isReadPermission }
+                    .forEach { perm ->
+                        val str = perm.uri.toString()
+                        if (str.contains("/tree/")) {
+                            urisToInspect.add(str)
+                        }
+                    }
+            }
+            if (urisToInspect.isEmpty()) {
+                _isInspectingFolders.value = false
+                return@launch
+            }
+            val collected = mutableListOf<DiscoveredSubfolder>()
+            for (uriStr in urisToInspect) {
+                val nodes = runCatching {
+                    MediaScanner.inspectTreeSubfolders(app, Uri.parse(uriStr), maxDepth = 2)
+                }.getOrDefault(emptyList())
+                collected.addAll(nodes)
+            }
+            if (collected.isNotEmpty()) {
+                _discoveredChecklistFolders.value = collected.distinctBy { it.selectionKey }
+            }
+            _isInspectingFolders.value = false
+        }
+    }
+
+    /**
+     * Step 2 of Selective Folder Scanning: scans STRICTLY ONLY the folders/subfolders checked
+     * by the user and ONLY the requested media types (Audio / Video / Photos), never scanning
+     * outside the user's selection.
+     */
+    fun confirmAndScanSelectedFolders(
+        selectedNodes: List<DiscoveredSubfolder>,
+        includeAudio: Boolean,
+        includeVideo: Boolean,
+        includePhoto: Boolean,
+    ) {
+        if (selectedNodes.isEmpty()) return
+        viewModelScope.launch {
+            _isScanning.value = true
+            _scanProgress.value = ScanProgressState(isScanning = true, discoveredCount = 0)
+
+            val groupedByTree = selectedNodes.groupBy { it.treeUriString }
+            val existingFolders = settingsRepo.getWatchedFolders().associateBy { it.uriString }.toMutableMap()
+            val cacheLookup = CachedMediaLookup(
+                audioById = _rawAudio.value.associateBy { it.id },
+                videoById = _rawVideos.value.associateBy { it.id },
+                photoById = _rawPhotos.value.associateBy { it.id },
+            )
+            val favs = settingsRepo.favoriteIdsFlow.first()
+
+            // Preserve non-folder media (demo tracks, direct picked files, streams) while replacing folder-scoped items cleanly
+            val keepAudio = _rawAudio.value.filter { it.sourceFolderUri.isBlank() }
+            val keepVideos = _rawVideos.value.filter { it.sourceFolderUri.isBlank() }
+            val keepPhotos = _rawPhotos.value.filter { it.sourceFolderUri.isBlank() }
+
+            var scannedScopedTotal = ScannedMediaResult(
+                audioTracks = keepAudio,
+                videos = keepVideos,
+                photos = keepPhotos,
+            )
+
+            // Disable any previously watched tree that the user completely unchecked
+            existingFolders.keys.forEach { oldUri ->
+                if (oldUri !in groupedByTree.keys) {
+                    existingFolders[oldUri] = existingFolders[oldUri]!!.copy(
+                        enabled = false,
+                        selectedSubfolderDocIds = emptyList(),
+                        audioCount = 0,
+                        videoCount = 0,
+                        photoCount = 0,
+                    )
+                }
+            }
+
+            var runningCount = 0
+            for ((treeUriStr, nodes) in groupedByTree) {
+                val treeUri = Uri.parse(treeUriStr)
+                val allowedIds = nodes.map { it.docId }.toSet()
+                val folderName = MediaScanner.resolveFolderDisplayName(getApplication(), treeUri)
+                _scanProgress.value = _scanProgress.value.copy(currentFolderName = folderName)
+
+                val res = runCatching {
+                    MediaScanner.scanFolderTreeFast(
+                        context = getApplication(),
+                        treeUri = treeUri,
+                        favoriteIds = favs,
+                        cacheLookup = cacheLookup,
+                        allowedDocIds = allowedIds,
+                        includeAudio = includeAudio,
+                        includeVideo = includeVideo,
+                        includePhoto = includePhoto,
+                        onBatchDiscovered = { batch, _ ->
+                            runningCount += batch.audioTracks.size + batch.videos.size + batch.photos.size
+                            _scanProgress.value = _scanProgress.value.copy(discoveredCount = runningCount)
+                            appendScannedMedia(batch)
+                        }
+                    )
+                }.getOrDefault(ScannedMediaResult())
+
+                scannedScopedTotal = mergeResults(scannedScopedTotal, res)
+                existingFolders[treeUriStr] = WatchedFolder(
+                    uriString = treeUriStr,
+                    displayName = folderName,
+                    enabled = true,
+                    audioCount = res.audioTracks.size,
+                    videoCount = res.videos.size,
+                    photoCount = res.photos.size,
+                    lastScannedMs = System.currentTimeMillis(),
+                    selectedSubfolderDocIds = allowedIds.toList(),
+                    includeAudio = includeAudio,
+                    includeVideo = includeVideo,
+                    includePhoto = includePhoto,
+                )
+            }
+
+            applyScannedMedia(scannedScopedTotal)
+            settingsRepo.saveWatchedFolders(existingFolders.values.toList())
+            settingsRepo.setFolderSetupCompleted(true)
+
+            val scannedMediaCount = runningCount.coerceAtLeast(
+                (scannedScopedTotal.audioTracks.size - keepAudio.size).coerceAtLeast(0) +
+                    (scannedScopedTotal.videos.size - keepVideos.size).coerceAtLeast(0) +
+                    (scannedScopedTotal.photos.size - keepPhotos.size).coerceAtLeast(0)
+            )
+            _statusBanner.value = stringsFor(settings.value.language)
+                .selectiveScannedConfirmedBanner(selectedNodes.size, scannedMediaCount)
+
+            val enriched = MediaScanner.enrichMediaParallel(
+                context = getApplication(),
+                discovered = scannedScopedTotal,
+                onPartialUpdate = { audioChunk, videoChunk, enrichedCount ->
+                    _scanProgress.value = _scanProgress.value.copy(enrichedCount = enrichedCount)
+                    mergeEnrichedChunk(audioChunk, videoChunk)
+                }
+            )
+            applyScannedMedia(enriched)
+            persistCurrentCache()
+            _isScanning.value = false
+            _scanProgress.value = ScanProgressState(isScanning = false)
+        }
+    }
+
     fun rescanSingleFolder(uriString: String) {
-        importFolder(Uri.parse(uriString))
+        viewModelScope.launch {
+            val saved = settingsRepo.getWatchedFolders().firstOrNull { it.uriString == uriString }
+            if (saved == null || saved.selectedSubfolderDocIds.isEmpty()) {
+                importFolder(Uri.parse(uriString))
+                return@launch
+            }
+            _isScanning.value = true
+            val treeUri = Uri.parse(uriString)
+            _scanProgress.value = ScanProgressState(isScanning = true, currentFolderName = saved.displayName)
+            val cacheLookup = CachedMediaLookup(
+                audioById = _rawAudio.value.associateBy { it.id },
+                videoById = _rawVideos.value.associateBy { it.id },
+                photoById = _rawPhotos.value.associateBy { it.id },
+            )
+            val favs = settingsRepo.favoriteIdsFlow.first()
+            var runningFound = 0
+            val discovered = MediaScanner.scanFolderTreeFast(
+                context = getApplication(),
+                treeUri = treeUri,
+                favoriteIds = favs,
+                cacheLookup = cacheLookup,
+                allowedDocIds = saved.selectedSubfolderDocIds.toSet(),
+                includeAudio = saved.includeAudio,
+                includeVideo = saved.includeVideo,
+                includePhoto = saved.includePhoto,
+                onBatchDiscovered = { batch, _ ->
+                    runningFound += batch.audioTracks.size + batch.videos.size + batch.photos.size
+                    _scanProgress.value = _scanProgress.value.copy(discoveredCount = runningFound)
+                }
+            )
+            _rawAudio.value = _rawAudio.value.filterNot { it.sourceFolderUri == uriString }
+            _rawVideos.value = _rawVideos.value.filterNot { it.sourceFolderUri == uriString }
+            _rawPhotos.value = _rawPhotos.value.filterNot { it.sourceFolderUri == uriString }
+            appendScannedMedia(discovered)
+
+            val updatedFolders = settingsRepo.getWatchedFolders().map {
+                if (it.uriString == uriString) it.copy(
+                    enabled = true,
+                    audioCount = discovered.audioTracks.size,
+                    videoCount = discovered.videos.size,
+                    photoCount = discovered.photos.size,
+                    lastScannedMs = System.currentTimeMillis()
+                ) else it
+            }
+            settingsRepo.saveWatchedFolders(updatedFolders)
+            val total = discovered.audioTracks.size + discovered.videos.size + discovered.photos.size
+            _statusBanner.value = stringsFor(settings.value.language).folderAddedBanner(saved.displayName, total)
+
+            val enriched = MediaScanner.enrichMediaParallel(
+                context = getApplication(),
+                discovered = discovered,
+                onPartialUpdate = { audioChunk, videoChunk, enrichedCount ->
+                    _scanProgress.value = _scanProgress.value.copy(enrichedCount = enrichedCount)
+                    mergeEnrichedChunk(audioChunk, videoChunk)
+                }
+            )
+            appendScannedMedia(enriched)
+            persistCurrentCache()
+            _isScanning.value = false
+            _scanProgress.value = ScanProgressState(isScanning = false)
+        }
     }
 
     fun setAutoScanWatchedFolders(enabled: Boolean) {

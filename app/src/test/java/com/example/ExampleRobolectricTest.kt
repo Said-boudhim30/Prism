@@ -1810,7 +1810,78 @@ class ExampleRobolectricTest {
             com.example.model.AutoStudioCategory.entries.forEach { assertTrue(s.autoStudioCategoryName(it).isNotBlank()) }
         }
     }
+
+    @Test
+    fun `selective checkbox folder persistence cached expressive shapes and strings verify cleanly`() {
+        val sample = listOf(
+            com.example.model.WatchedFolder(
+                uriString = "content://com.android.externalstorage.documents/tree/primary%3AMusic",
+                displayName = "Music",
+                enabled = true,
+                audioCount = 12,
+                videoCount = 0,
+                photoCount = 0,
+                lastScannedMs = 1730000000000L,
+                selectedSubfolderDocIds = listOf("primary:Music/Quran", "primary:Music/Favorites"),
+                includeAudio = true,
+                includeVideo = false,
+                includePhoto = false,
+            )
+        )
+        val encoded = com.example.data.SettingsRepository.encodeWatchedFoldersJson(sample)
+        val decoded = com.example.data.SettingsRepository.parseWatchedFoldersJson(encoded)
+        assertEquals(1, decoded.size)
+        assertEquals(listOf("primary:Music/Quran", "primary:Music/Favorites"), decoded[0].selectedSubfolderDocIds)
+        assertEquals(true, decoded[0].includeAudio)
+        assertEquals(false, decoded[0].includeVideo)
+        assertEquals(false, decoded[0].includePhoto)
+
+        val node = com.example.model.DiscoveredSubfolder(
+            treeUriString = sample[0].uriString,
+            docId = "primary:Music/Quran",
+            displayName = "Quran",
+            parentPath = "Music/Quran",
+            isRoot = false,
+            directMediaCount = 12,
+        )
+        assertEquals("${sample[0].uriString}|primary:Music/Quran", node.selectionKey)
+
+        // Verify expressive shapes are cached singletons (zero per-frame allocations -> zero ANR)
+        val s1 = com.example.ui.components.PrismExpressiveShapes.scallopedCookie()
+        val s2 = com.example.ui.components.PrismExpressiveShapes.scallopedCookie()
+        assertTrue("Scalloped cookie shape must be cached singleton", s1 === s2)
+        assertTrue(com.example.ui.components.PrismExpressiveShapes.usesGenericOutline(com.example.model.PlayerArtworkStyle.SCALLOPED_COOKIE))
+        assertTrue(!com.example.ui.components.PrismExpressiveShapes.usesGenericOutline(com.example.model.PlayerArtworkStyle.ROUNDED_CARD))
+
+        val forbidden = listOf("spotify", "apple", "samsung", "vlc", "youtube", "iphone", "poweramp")
+        AppLanguage.entries.forEach { lang ->
+            val s = stringsFor(lang)
+            val checked = listOf(
+                s.selectiveFolderChecklistTitle,
+                s.selectiveFolderChecklistHint,
+                s.selectiveConfirmScanBtn(3),
+                s.selectiveSelectAll,
+                s.selectiveClearAll,
+                s.selectiveScanningOnlyCheckedHint,
+                s.selectiveDirectFilesBadge(5),
+                s.selectiveMediaTypesLabel,
+                s.selectiveEmptyChecklistHint,
+                s.selectiveInspectingFoldersLabel,
+                s.selectiveScannedConfirmedBanner(2, 14),
+                s.settingsStudioHubSectionTitle,
+                s.settingsStudioHubSectionSubtitle,
+            )
+            checked.forEach { text ->
+                assertTrue("Selective folder string must not be blank for $lang", text.isNotBlank())
+                val lower = text.lowercase()
+                forbidden.forEach { brand ->
+                    assertTrue("String must not contain trademark '$brand': $text", !lower.contains(brand))
+                }
+            }
+        }
+    }
 }
+
 
 
 

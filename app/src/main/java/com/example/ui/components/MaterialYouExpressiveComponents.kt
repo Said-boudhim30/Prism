@@ -163,9 +163,9 @@ fun SquigglyAudioProgressBar(
         label = "squigglyAmplitude"
     )
 
-    val phase = if (animatedAmp > 0.01f) {
+    val phaseState = if (animatedAmp > 0.01f) {
         val infinite = rememberInfiniteTransition(label = "squigglyPhase")
-        val p by infinite.animateFloat(
+        infinite.animateFloat(
             initialValue = 0f,
             targetValue = (2.0 * PI).toFloat(),
             animationSpec = infiniteRepeatable(
@@ -174,10 +174,10 @@ fun SquigglyAudioProgressBar(
             ),
             label = "squigglyWavePhase"
         )
-        p
     } else {
-        0f
+        null
     }
+    val wavePath = remember { Path() }
 
     Canvas(
         modifier = modifier
@@ -196,6 +196,7 @@ fun SquigglyAudioProgressBar(
                 }
             }
     ) {
+        val phase = phaseState?.value ?: 0f
         val w = size.width
         val centerY = size.height / 2f
         val strokePx = strokeWidth.toPx()
@@ -220,26 +221,25 @@ fun SquigglyAudioProgressBar(
             val ampPx = waveAmplitudeDp.toPx() * animatedAmp
             if (ampPx > 0.15f) {
                 val wavelengthPx = 22.dp.toPx()
-                val stepPx = 3f
-                val path = Path()
+                val stepPx = 4f
+                wavePath.rewind()
                 var x = 0f
                 var first = true
                 while (x <= waveEndX) {
-                    // Gently taper wave near the playhead so it meets the thumb cleanly
                     val distFromEnd = (waveEndX - x).coerceAtLeast(0f)
                     val taper = (distFromEnd / 14.dp.toPx()).coerceIn(0f, 1f)
                     val y = centerY + sin((x / wavelengthPx) * 2f * PI.toFloat() - phase) * ampPx * taper
                     if (first) {
-                        path.moveTo(x, y)
+                        wavePath.moveTo(x, y)
                         first = false
                     } else {
-                        path.lineTo(x, y)
+                        wavePath.lineTo(x, y)
                     }
                     x += stepPx
                 }
-                path.lineTo(waveEndX, centerY)
+                wavePath.lineTo(waveEndX, centerY)
                 drawPath(
-                    path = path,
+                    path = wavePath,
                     color = activeColor,
                     style = Stroke(width = strokePx, cap = StrokeCap.Round)
                 )

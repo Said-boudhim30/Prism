@@ -561,6 +561,8 @@ fun PrismAppRoot(
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val scanProgress by viewModel.scanProgress.collectAsStateWithLifecycle()
+    val discoveredChecklistFolders by viewModel.discoveredChecklistFolders.collectAsStateWithLifecycle()
+    val isInspectingFolders by viewModel.isInspectingFolders.collectAsStateWithLifecycle()
     val showFirstLaunchWizard by viewModel.showFirstLaunchFolderWizard.collectAsStateWithLifecycle()
     val watchedFolders by viewModel.watchedFolders.collectAsStateWithLifecycle()
     val availableMusicFolders by viewModel.availableMusicFolders.collectAsStateWithLifecycle()
@@ -901,11 +903,18 @@ fun PrismAppRoot(
         )
     }
 
+    LaunchedEffect(showSmartImportSheet) {
+        if (showSmartImportSheet) {
+            viewModel.loadGrantedFoldersForChecklist()
+        }
+    }
+
     val folderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) {
-            viewModel.importFolder(uri)
+            viewModel.inspectGrantedFolderForChecklist(uri)
+            showSmartImportSheet = true
         }
     }
 
@@ -1074,11 +1083,11 @@ fun PrismAppRoot(
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
             ) {
-                // Authentic Material You Living Ambient Backdrop behind Liquid Glass surfaces
+                // Authentic Material You Living Ambient Backdrop (paused when Full Player or Video covers screen!)
                 MaterialLiquidAmbientBackdrop(
                     isDarkTheme = settings.darkTheme,
                     amoledBlack = settings.amoledBlack,
-                    isPlaying = playbackState.isPlaying,
+                    isPlaying = playbackState.isPlaying && !playbackState.isPlayerExpanded && activeVideo == null,
                     modifier = Modifier.fillMaxSize()
                 )
                 val isWideScreen = maxWidth >= 700.dp
@@ -1828,8 +1837,10 @@ fun PrismAppRoot(
                         )
                     ) { it } + fadeOut(tween(150))
                 ) {
-                    val activeLyrics = playbackState.currentTrack?.let { tr ->
-                        viewModel.resolveLyricsForTrack(tr, customLyrics)
+                    val activeLyrics = remember(playbackState.currentTrack?.id, customLyrics) {
+                        playbackState.currentTrack?.let { tr ->
+                            viewModel.resolveLyricsForTrack(tr, customLyrics)
+                        }
                     }
                     FullPlayerSheet(
                         playbackState = playbackState,
@@ -2560,14 +2571,16 @@ fun PrismAppRoot(
                     )
                 }
 
-                // Smart Zero-Friction Media & Allowed-Folder Import Sheet (Fixes Android 11-16 SAF root restriction)
+                // Smart Zero-Friction Selective Checkbox Folder & Media Import Sheet
                 if (showSmartImportSheet) {
                     SmartMediaImportSheet(
                         activeTab = selectedTab,
                         strings = strings,
+                        discoveredFolders = discoveredChecklistFolders,
+                        watchedFolders = watchedFolders,
+                        isInspectingFolders = isInspectingFolders,
                         onDismiss = { showSmartImportSheet = false },
                         onLaunchFolderWithSubpath = { subpath ->
-                            showSmartImportSheet = false
                             launchSafFolderSubpath(subpath)
                         },
                         onLaunchDirectFilesPicker = {
@@ -2581,6 +2594,9 @@ fun PrismAppRoot(
                         onLaunchVisualGalleryPicker = {
                             showSmartImportSheet = false
                             launchVisualPicker()
+                        },
+                        onConfirmSelectedFolders = { nodes, incAudio, incVideo, incPhoto ->
+                            viewModel.confirmAndScanSelectedFolders(nodes, incAudio, incVideo, incPhoto)
                         }
                     )
                 }
@@ -2648,8 +2664,10 @@ fun PrismAppRoot(
 
                 // Prism Full-Screen Lock-Screen Identity & Playback Overlay (Active on Lock Screen & Live Settings Preview)
                 if (showLockScreenOverlay && !isAppLocked) {
-                    val lockLyrics = playbackState.currentTrack?.let { tr ->
-                        viewModel.resolveLyricsForTrack(tr, customLyrics)
+                    val lockLyrics = remember(playbackState.currentTrack?.id, customLyrics) {
+                        playbackState.currentTrack?.let { tr ->
+                            viewModel.resolveLyricsForTrack(tr, customLyrics)
+                        }
                     }
                     LockScreenPlayerOverlay(
                         playbackState = playbackState,

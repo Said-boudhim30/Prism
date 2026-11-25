@@ -900,6 +900,19 @@ interface AppStrings {
     val storagePickDownloadsAction: String
     val storagePickGalleryAction: String
     val storageAccessReadyBadge: String
+    val selectiveFolderChecklistTitle: String
+    val selectiveFolderChecklistHint: String
+    val selectiveConfirmScanBtn: (Int) -> String
+    val selectiveSelectAll: String
+    val selectiveClearAll: String
+    val selectiveScanningOnlyCheckedHint: String
+    val selectiveDirectFilesBadge: (Int) -> String
+    val selectiveMediaTypesLabel: String
+    val selectiveEmptyChecklistHint: String
+    val selectiveInspectingFoldersLabel: String
+    val selectiveScannedConfirmedBanner: (Int, Int) -> String
+    val settingsStudioHubSectionTitle: String
+    val settingsStudioHubSectionSubtitle: String
 
     fun proEqPresetName(preset: com.example.model.ProEqPreset): String
     fun headphoneProfileName(profile: com.example.model.HeadphoneTuningProfile): String
@@ -1920,6 +1933,21 @@ private object EnglishStrings : AppStrings {
     override val storagePickDownloadsAction = "Access Downloads Files"
     override val storagePickGalleryAction = "Gallery Access"
     override val storageAccessReadyBadge = "Safe Persistent Access"
+    override val selectiveFolderChecklistTitle = "Choose Folders to Scan"
+    override val selectiveFolderChecklistHint = "Check only the folders you want — Prism will never scan unchecked folders."
+    override val selectiveConfirmScanBtn: (Int) -> String = { n -> "Confirm & Scan Selected ($n)" }
+    override val selectiveSelectAll = "Select All"
+    override val selectiveClearAll = "Clear"
+    override val selectiveScanningOnlyCheckedHint = "Strict scope: only checked folders & selected media types will be scanned."
+    override val selectiveDirectFilesBadge: (Int) -> String = { n -> "$n files" }
+    override val selectiveMediaTypesLabel = "Media Types to Scan"
+    override val selectiveEmptyChecklistHint = "Tap any device folder above (Music, Movies, Pictures, DCIM…) to list its subfolders with checkboxes."
+    override val selectiveInspectingFoldersLabel = "Reading existing folders…"
+    override val selectiveScannedConfirmedBanner: (Int, Int) -> String = { folders, files ->
+        "Scanned $files items strictly from $folders checked folder(s)"
+    }
+    override val settingsStudioHubSectionTitle = "Prism Studio & Tools Hub"
+    override val settingsStudioHubSectionSubtitle = "Quran, Adhkar, Vault, Stats, Collage, Wi-Fi & Audio Profiles"
 
     override fun proEqPresetName(preset: com.example.model.ProEqPreset): String = when (preset) {
         com.example.model.ProEqPreset.FLAT -> "Flat Reference"
@@ -2941,6 +2969,21 @@ private object ArabicStrings : AppStrings {
     override val storagePickDownloadsAction = "الوصول لملفات التنزيلات"
     override val storagePickGalleryAction = "الوصول للمعرض"
     override val storageAccessReadyBadge = "وصول دائم وآمن"
+    override val selectiveFolderChecklistTitle = "تحديد المجلدات المطلوبة للفحص"
+    override val selectiveFolderChecklistHint = "علّم فقط على المجلدات التي تريدها — لن يفحص التطبيق أي مجلد غير محدد."
+    override val selectiveConfirmScanBtn: (Int) -> String = { n -> "تأكيد وفحص المحدد ($n)" }
+    override val selectiveSelectAll = "تحديد الكل"
+    override val selectiveClearAll = "إلغاء الكل"
+    override val selectiveScanningOnlyCheckedHint = "فحص دقيق: يتم فحص المجلدات المحددة وأنواع الوسائط المختارة فقط."
+    override val selectiveDirectFilesBadge: (Int) -> String = { n -> "$n ملف" }
+    override val selectiveMediaTypesLabel = "أنواع الوسائط المراد فحصها"
+    override val selectiveEmptyChecklistHint = "اختر أي مجلد موجود في هاتفك أعلاه (الموسيقى، الفيديو، الصور، الكاميرا...) لعرض مجلداته بعلامات التحديد."
+    override val selectiveInspectingFoldersLabel = "جارٍ قراءة المجلدات الموجودة…"
+    override val selectiveScannedConfirmedBanner: (Int, Int) -> String = { folders, files ->
+        "تم فحص $files ملف بدقة من $folders مجلد محدد فقط"
+    }
+    override val settingsStudioHubSectionTitle = "أدوات واستوديو بريزم"
+    override val settingsStudioHubSectionSubtitle = "القرآن، الأذكار، الخزنة، الإحصائيات، الكولاج، الواي فاي وملفات الصوت"
 
     override fun proEqPresetName(preset: com.example.model.ProEqPreset): String = when (preset) {
         com.example.model.ProEqPreset.FLAT -> "مرجعي مسطح"
@@ -3297,6 +3340,21 @@ private object FrenchStrings : AppStrings by EnglishStrings {
     override val storageGrantFolderAction = "Autoriser un dossier"
     override val storagePickDownloadsAction = "Fichiers Téléchargements"
     override val storagePickGalleryAction = "Accès Galerie"
+    override val selectiveFolderChecklistTitle = "Sélectionner les dossiers à scanner"
+    override val selectiveFolderChecklistHint = "Cochez uniquement les dossiers voulus — aucun dossier non coché ne sera scanné."
+    override val selectiveConfirmScanBtn: (Int) -> String = { n -> "Confirmer et scanner ($n)" }
+    override val selectiveSelectAll = "Tout cocher"
+    override val selectiveClearAll = "Effacer"
+    override val selectiveScanningOnlyCheckedHint = "Portée stricte : seuls les dossiers cochés et types sélectionnés sont scannés."
+    override val selectiveDirectFilesBadge: (Int) -> String = { n -> "$n fichiers" }
+    override val selectiveMediaTypesLabel = "Types de médias à scanner"
+    override val selectiveEmptyChecklistHint = "Choisissez un dossier du téléphone ci-dessus pour afficher ses sous-dossiers avec cases à cocher."
+    override val selectiveInspectingFoldersLabel = "Lecture des dossiers existants…"
+    override val selectiveScannedConfirmedBanner: (Int, Int) -> String = { folders, files ->
+        "$files éléments scannés depuis $folders dossier(s) coché(s)"
+    }
+    override val settingsStudioHubSectionTitle = "Studio et Outils Prism"
+    override val settingsStudioHubSectionSubtitle = "Coran, Adhkar, Coffre, Stats, Collage, Wi-Fi et Profils Audio"
 }
 
 private object SpanishStrings : AppStrings by EnglishStrings {
@@ -3621,6 +3679,21 @@ private object SpanishStrings : AppStrings by EnglishStrings {
     override val storageGrantFolderAction = "Autorizar carpeta"
     override val storagePickDownloadsAction = "Archivos de Descargas"
     override val storagePickGalleryAction = "Acceso a Galería"
+    override val selectiveFolderChecklistTitle = "Elegir carpetas para escanear"
+    override val selectiveFolderChecklistHint = "Marca solo las carpetas deseadas — Prism nunca escaneará carpetas sin marcar."
+    override val selectiveConfirmScanBtn: (Int) -> String = { n -> "Confirmar y escanear ($n)" }
+    override val selectiveSelectAll = "Marcar todo"
+    override val selectiveClearAll = "Limpiar"
+    override val selectiveScanningOnlyCheckedHint = "Alcance estricto: solo se escanean las carpetas marcadas y los tipos elegidos."
+    override val selectiveDirectFilesBadge: (Int) -> String = { n -> "$n archivos" }
+    override val selectiveMediaTypesLabel = "Tipos de medios a escanear"
+    override val selectiveEmptyChecklistHint = "Elige cualquier carpeta existente arriba para ver sus subcarpetas con casillas."
+    override val selectiveInspectingFoldersLabel = "Leyendo carpetas existentes…"
+    override val selectiveScannedConfirmedBanner: (Int, Int) -> String = { folders, files ->
+        "$files elementos escaneados desde $folders carpeta(s) marcada(s)"
+    }
+    override val settingsStudioHubSectionTitle = "Estudio y Herramientas Prism"
+    override val settingsStudioHubSectionSubtitle = "Corán, Adhkar, Bóveda, Estadísticas, Collage, Wi-Fi y Perfiles de Audio"
 }
 
 fun stringsFor(language: AppLanguage): AppStrings = when (language) {

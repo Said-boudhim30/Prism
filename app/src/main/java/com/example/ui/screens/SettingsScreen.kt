@@ -236,6 +236,7 @@ import com.example.ui.components.LivePhotoGridPreviewCard
 import com.example.ui.components.LiveVideoCinemaPreviewCard
 
 private val AllSectionKeys = listOf(
+    "studio_hub",
     "appearance",
     "player_card",
     "lock_screen",
@@ -425,10 +426,11 @@ fun SettingsScreen(
     var showIntruderLogDialog by remember { mutableStateOf(false) }
     var settingsSearchQuery by remember { mutableStateOf("") }
 
-    // Ordered Expandable Accordion state — cleanly separated per media & customization category
+    // Ordered Expandable Accordion state — all sections start cleanly collapsed so users never get lost!
     val expandedSections = remember {
         mutableStateMapOf(
-            "appearance" to true,
+            "studio_hub" to false,
+            "appearance" to false,
             "player_card" to false,
             "lock_screen" to false,
             "nav_layout" to false,
@@ -474,209 +476,223 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(settingsSectionSpacing),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Quick Settings Search + Expand All / Collapse All Control Bar
+        // Clean, Self-Contained Settings Header Card (Search + Layout + Expand/Collapse + Version + Pro Studio)
         item(key = "settings_accordion_toolbar") {
-            Column(
+            Surface(
+                shape = RoundedCornerShape(scaledCornerDp(28.dp, settings.shapeRoundness)),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)),
                 modifier = Modifier
                     .widthIn(max = 720.dp)
                     .fillMaxWidth()
-                    .padding(horizontal = 2.dp, vertical = 2.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                OutlinedTextField(
-                    value = settingsSearchQuery,
-                    onValueChange = { settingsSearchQuery = it },
-                    singleLine = true,
-                    placeholder = {
-                        Text(
-                            text = strings.settingsSearchHint,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Filled.Search,
-                            contentDescription = strings.settingsSearchHint,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    },
-                    trailingIcon = {
-                        if (settingsSearchQuery.isNotEmpty()) {
-                            IconButton(onClick = { settingsSearchQuery = "" }) {
-                                Icon(
-                                    imageVector = Icons.Filled.Close,
-                                    contentDescription = strings.close
-                                )
-                            }
-                        }
-                    },
-                    shape = CircleShape,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                    ),
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("settings_search_input")
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Instant Settings Content Layout Switcher: Horizontal Swipe Pages vs Vertical List
-                    val isHorizontal = settings.settingsLayoutMode == SettingsLayoutMode.HORIZONTAL_PAGES
-                    val layoutInteraction = remember { MutableInteractionSource() }
-                    Surface(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSettingsLayoutModeChange(
-                                if (isHorizontal) SettingsLayoutMode.VERTICAL_LIST
-                                else SettingsLayoutMode.HORIZONTAL_PAGES
-                            )
-                        },
-                        interactionSource = layoutInteraction,
-                        shape = CircleShape,
-                        color = if (isHorizontal) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHigh
-                        },
-                        border = BorderStroke(
-                            1.dp,
-                            if (isHorizontal) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                        ),
-                        modifier = Modifier
-                            .expressivePressScale(layoutInteraction, pressedScale = 0.93f)
-                            .testTag("settings_layout_mode_toggle")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isHorizontal) Icons.Filled.SwapHoriz else Icons.Filled.ViewList,
-                                contentDescription = strings.settingsLayoutModeTitle,
-                                tint = if (isHorizontal) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.size(18.dp)
-                            )
+                    OutlinedTextField(
+                        value = settingsSearchQuery,
+                        onValueChange = { settingsSearchQuery = it },
+                        singleLine = true,
+                        placeholder = {
                             Text(
-                                text = if (isHorizontal) strings.settingsLayoutHorizontal else strings.settingsLayoutVertical,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isHorizontal) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
+                                text = strings.settingsSearchHint,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                        }
-                    }
-
-                    val toggleAllInteraction = remember { MutableInteractionSource() }
-                    Surface(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            val target = !allExpanded
-                            AllSectionKeys.forEach { expandedSections[it] = target }
                         },
-                        interactionSource = toggleAllInteraction,
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier
-                            .expressivePressScale(toggleAllInteraction, pressedScale = 0.93f)
-                            .testTag("settings_toggle_all_sections")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
+                        leadingIcon = {
                             Icon(
-                                imageVector = if (allExpanded) Icons.Filled.UnfoldLess else Icons.Filled.UnfoldMore,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.size(18.dp)
+                                imageVector = Icons.Filled.Search,
+                                contentDescription = strings.settingsSearchHint,
+                                tint = MaterialTheme.colorScheme.primary
                             )
-                            Text(
-                                text = if (allExpanded) strings.collapseAllSections else strings.expandAllSections,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                    }
-                }
+                        },
+                        trailingIcon = {
+                            if (settingsSearchQuery.isNotEmpty()) {
+                                IconButton(onClick = { settingsSearchQuery = "" }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Close,
+                                        contentDescription = strings.close
+                                    )
+                                }
+                            }
+                        },
+                        shape = CircleShape,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settings_search_input")
+                    )
 
-                // Beta 4.4 Expressive Material You Quick Bar (Pro Audio Studio + Version Pill + Default Player)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        onClick = onOpenProAudioStudio,
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("settings_quick_pro_audio_studio")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        val isHorizontal = settings.settingsLayoutMode == SettingsLayoutMode.HORIZONTAL_PAGES
+                        val layoutInteraction = remember { MutableInteractionSource() }
+                        Surface(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSettingsLayoutModeChange(
+                                    if (isHorizontal) SettingsLayoutMode.VERTICAL_LIST
+                                    else SettingsLayoutMode.HORIZONTAL_PAGES
+                                )
+                            },
+                            interactionSource = layoutInteraction,
+                            shape = CircleShape,
+                            color = if (isHorizontal) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                if (isHorizontal) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .expressivePressScale(layoutInteraction, pressedScale = 0.94f)
+                                .testTag("settings_layout_mode_toggle")
                         ) {
-                            Icon(
-                                imageVector = Icons.Filled.GraphicEq,
-                                contentDescription = strings.proStudioTitle,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = strings.proStudioTitle,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isHorizontal) Icons.Filled.SwapHoriz else Icons.Filled.ViewList,
+                                    contentDescription = strings.settingsLayoutModeTitle,
+                                    tint = if (isHorizontal) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = if (isHorizontal) strings.settingsLayoutHorizontal else strings.settingsLayoutVertical,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isHorizontal) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        val toggleAllInteraction = remember { MutableInteractionSource() }
+                        Surface(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                val target = !allExpanded
+                                AllSectionKeys.forEach { expandedSections[it] = target }
+                            },
+                            interactionSource = toggleAllInteraction,
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            modifier = Modifier
+                                .weight(1f)
+                                .expressivePressScale(toggleAllInteraction, pressedScale = 0.94f)
+                                .testTag("settings_toggle_all_sections")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (allExpanded) Icons.Filled.UnfoldLess else Icons.Filled.UnfoldMore,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = if (allExpanded) strings.collapseAllSections else strings.expandAllSections,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.45f)),
-                        modifier = Modifier.testTag("settings_version_badge")
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = strings.appVersionLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
-                        )
+                        Surface(
+                            onClick = onOpenProAudioStudio,
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("settings_quick_pro_audio_studio")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.GraphicEq,
+                                    contentDescription = strings.proStudioTitle,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = strings.proStudioTitle,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.45f)),
+                            modifier = Modifier.testTag("settings_version_badge")
+                        ) {
+                            Text(
+                                text = strings.appVersionLabel,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // Prism Studio & Spiritual Quick-Launcher Hub Card
+        // Prism Studio & Tools Hub — neatly contained inside its own Collapsible Section Card!
         if (matchesSection(
+                strings.settingsStudioHubSectionTitle,
                 strings.quranHubTitle,
                 strings.morningAlarmTitle,
                 strings.tasbihTitle,
@@ -690,78 +706,61 @@ fun SettingsScreen(
             )
         ) {
             item(key = "sec_studio_hub") {
-                Surface(
-                    shape = RoundedCornerShape(scaledCornerDp(28.dp, settings.shapeRoundness)),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
-                    modifier = Modifier
-                        .widthIn(max = 720.dp)
-                        .fillMaxWidth()
-                        .testTag("settings_studio_hub")
+                ExpandableSettingsSection(
+                    title = strings.settingsStudioHubSectionTitle,
+                    subtitle = strings.settingsStudioHubSectionSubtitle,
+                    icon = Icons.Filled.AutoAwesome,
+                    expanded = isSectionExpanded("studio_hub"),
+                    strings = strings,
+                    tag = "settings_studio_hub",
+                    onToggle = { expandedSections["studio_hub"] = !(expandedSections["studio_hub"] ?: false) }
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    val hubEntries = listOf(
+                        Triple(Icons.Filled.Search, strings.globalSearchTitle, onOpenGlobalSearch),
+                        Triple(Icons.Filled.MenuBook, strings.quranHubTitle, onOpenQuranHub),
+                        Triple(Icons.Filled.WbSunny, strings.adhkarTitle, onOpenAdhkarStudio),
+                        Triple(Icons.Filled.AccessAlarm, strings.morningAlarmTitle, onOpenMorningAlarm),
+                        Triple(Icons.Filled.AutoAwesome, strings.tasbihTitle, onOpenTasbih),
+                        Triple(Icons.Filled.Headphones, strings.audioProfilesTitle, onOpenAudioProfiles),
+                        Triple(Icons.Filled.DeleteOutline, "${strings.recycleBinTitle} ($trashedCount)", onOpenRecycleBin),
+                        Triple(Icons.Filled.BarChart, strings.listeningStatsTitle, onOpenListeningStats),
+                        Triple(Icons.Filled.Shield, strings.privateVaultTitle, onOpenPrivateVault),
+                        Triple(Icons.Filled.GridView, strings.collageStudioTitle, onOpenCollageStudio),
+                        Triple(Icons.Filled.Wifi, strings.wifiTransferTitle, onOpenWifiTransfer),
+                        Triple(Icons.Filled.ColorLens, strings.customSeedTitle, onOpenCustomSeed),
+                        Triple(Icons.Filled.QrCode2, strings.themeCodeTitle, onOpenThemeCode),
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = strings.quranHubTitle + " • Prism Studio",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        val hubEntries = listOf(
-                            Triple(Icons.Filled.Search, strings.globalSearchTitle, onOpenGlobalSearch),
-                            Triple(Icons.Filled.MenuBook, strings.quranHubTitle, onOpenQuranHub),
-                            Triple(Icons.Filled.WbSunny, strings.adhkarTitle, onOpenAdhkarStudio),
-                            Triple(Icons.Filled.AccessAlarm, strings.morningAlarmTitle, onOpenMorningAlarm),
-                            Triple(Icons.Filled.AutoAwesome, strings.tasbihTitle, onOpenTasbih),
-                            Triple(Icons.Filled.Headphones, strings.audioProfilesTitle, onOpenAudioProfiles),
-                            Triple(Icons.Filled.DeleteOutline, "${strings.recycleBinTitle} ($trashedCount)", onOpenRecycleBin),
-                            Triple(Icons.Filled.BarChart, strings.listeningStatsTitle, onOpenListeningStats),
-                            Triple(Icons.Filled.Shield, strings.privateVaultTitle, onOpenPrivateVault),
-                            Triple(Icons.Filled.GridView, strings.collageStudioTitle, onOpenCollageStudio),
-                            Triple(Icons.Filled.Wifi, strings.wifiTransferTitle, onOpenWifiTransfer),
-                            Triple(Icons.Filled.ColorLens, strings.customSeedTitle, onOpenCustomSeed),
-                            Triple(Icons.Filled.QrCode2, strings.themeCodeTitle, onOpenThemeCode),
-                        )
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            hubEntries.forEachIndexed { idx, (icon, label, action) ->
-                                Surface(
-                                    onClick = action,
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.78f),
-                                    modifier = Modifier.testTag("studio_hub_btn_$idx")
+                        hubEntries.forEachIndexed { idx, (icon, label, action) ->
+                            Surface(
+                                onClick = action,
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.82f),
+                                modifier = Modifier.testTag("studio_hub_btn_$idx")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = icon,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = label,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
-                                    }
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                         }
@@ -3952,7 +3951,12 @@ fun SettingsScreen(
                             ) {
                                 Icon(Icons.Filled.CreateNewFolder, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text(strings.storageGrantFolderAction, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = strings.storageGrantFolderAction,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -4003,7 +4007,9 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "${strings.manageFoldersAction} (${watchedFolders.size})",
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -5231,6 +5237,7 @@ private fun ExpandableSettingsSection(
         modifier = Modifier
             .widthIn(max = 720.dp)
             .fillMaxWidth()
+            .clip(RoundedCornerShape(sectionCorner))
             .testTag(tag)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -5477,12 +5484,16 @@ private fun SettingsToggleRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
             )
         }
         Spacer(modifier = Modifier.width(12.dp))

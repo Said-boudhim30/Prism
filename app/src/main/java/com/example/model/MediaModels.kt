@@ -241,8 +241,27 @@ data class WatchedFolder(
     val videoCount: Int = 0,
     val photoCount: Int = 0,
     val lastScannedMs: Long = 0L,
+    val selectedSubfolderDocIds: List<String> = emptyList(),
+    val includeAudio: Boolean = true,
+    val includeVideo: Boolean = true,
+    val includePhoto: Boolean = true,
 ) {
     val totalCount: Int get() = audioCount + videoCount + photoCount
+}
+
+/**
+ * Represents an existing device folder or subfolder inside a user-granted SAF tree
+ * shown with an interactive Checkbox before confirming a strictly scoped scan.
+ */
+data class DiscoveredSubfolder(
+    val treeUriString: String,
+    val docId: String,
+    val displayName: String,
+    val parentPath: String,
+    val isRoot: Boolean,
+    val directMediaCount: Int = 0,
+) {
+    val selectionKey: String get() = "$treeUriString|$docId"
 }
 
 data class TrackTagOverride(
